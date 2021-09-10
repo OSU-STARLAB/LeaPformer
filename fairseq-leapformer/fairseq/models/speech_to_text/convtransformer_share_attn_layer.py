@@ -16,8 +16,12 @@ from fairseq.models import (
     register_model_architecture,
 )
 from fairseq.models.transformer import Embedding, TransformerDecoder
-from fairseq.modules import LayerNorm, PositionalEmbedding, TransformerEncoderLayer
+from fairseq.modules import LayerNorm, PositionalEmbedding, TransformerEncoderLayer, MultiheadAttention
 from torch import Tensor
+
+# th-code
+from fairseq.models.transformer import TransformerConfig
+# th-code
 
 logger = logging.getLogger(__name__)
 
@@ -153,19 +157,18 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             metavar="INT",
             help="the number of output channels of conv layer",
         )
-
         # th-code
         parser.add_argument(
-            "--share-ffn-attn",
+            "--share-attention",
             action="store_true",
-            help="if True, share both feed-forward network and attention across layers",
+            help="if True, share attention across layers",
         )
         parser.add_argument(
-            "--share-ffn-attn-layer",
+            "--share-attn-layer",
             nargs="+",
             type=int,
             metavar="INT INT",
-            help=":The list of sharing layers for both feed-forward network and attention. The range of layer number starts from 1, and the layer number which is over the range would not work.",
+            help=":The list of sharing attention layers. The range of layer number starts from 1, and the layer number which is over the range would not work.",
         )
         # th-code
 
@@ -279,25 +282,24 @@ class ConvTransformerEncoder(FairseqEncoder):
 
         self.transformer_layers = nn.ModuleList([])
         # th-code
-        if getattr(args, "share_ffn_attn", None):
-            print('Start sharing both feed-forward and attention.')
-            if getattr(args, "share_ffn_attn_layer", None):
-                lst_ffn_attn_layer = args.share_ffn_attn_layer
+        if getattr(args, "share_attention", None):
+            print('Start sharing the attention.')
+            if getattr(args, "share_attn_layer", None):
+                lst_attn_layer = args.share_attn_layer
             else:
-                lst_ffn_attn_layer = []
+                lst_attn_layer = []
 
-            print('Sharing the list of layers: ', lst_ffn_attn_layer)
-            share_ffn_attn_layer = TransformerEncoderLayer(args)
+            print('Sharing the list of layers: ', lst_attn_layer)
+            cfg = TransformerConfig.from_namespace(args)
+            share_attn = self.build_share_attention(cfg)
             for i in range(args.encoder_layers):
-                if i+1 in lst_ffn_attn_layer:
-                    print('Start sharing both feed-forward network and attention in this layer.')
-                    self.transformer_layers.append(share_ffn_attn_layer)
+                if i+1 in lst_attn_layer:
+                    self.transformer_layers.append(TransformerEncoderLayer(args, share_attn))
                 else:
-                    print('Create a new layer.')
-                    self.transformer_layers.append(TransformerEncoderLayer(args))
+                    self.transformer_layers.append(TransformerEncoderLayer(args, None))
         else:
             self.transformer_layers.extend(
-                [TransformerEncoderLayer(args) for i in range(args.encoder_layers)]
+                [TransformerEncoderLayer(args, None) for i in range(args.encoder_layers)]
             )
         # th-code
 
@@ -305,6 +307,18 @@ class ConvTransformerEncoder(FairseqEncoder):
             self.layer_norm = LayerNorm(args.encoder_embed_dim)
         else:
             self.layer_norm = None
+
+    # th-code
+    def build_share_attention(self, cfg):
+        return MultiheadAttention(
+            cfg.encoder.embed_dim,
+            cfg.encoder.attention_heads,
+            dropout=cfg.attention_dropout,
+            self_attention=True,
+            q_noise=cfg.quant_noise.pq,
+            qn_block_size=cfg.quant_noise.pq_block_size,
+        )
+    # th-code
 
     def pooling_ratio(self):
         return 4
