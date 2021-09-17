@@ -114,12 +114,33 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             self.layers = LayerDropModuleList(p=self.decoder_layerdrop)
         else:
             self.layers = nn.ModuleList([])
-        self.layers.extend(
-            [
-                self.build_decoder_layer(cfg, no_encoder_attn)
-                for _ in range(cfg.decoder.layers)
-            ]
-        )
+
+        # th-code
+        if cfg.share_ffn_attn:
+            print('Decoder: Start sharing both feed-forward network and attention.')
+            if cfg.share_decoder_ffn_attn_layer is not None:
+                lst_decoder_ffn_attn_layer = cfg.share_decoder_ffn_attn_layer
+            else:
+                lst_decoder_ffn_attn_layer = []
+
+            print('Decoder: Sharing the list of layers: ', lst_decoder_ffn_attn_layer)
+            share_decoder_ffn_attn_layer = self.build_decoder_layer(cfg, no_encoder_attn)
+            for i in range(cfg.decoder.layers):
+                if i+1 in lst_decoder_ffn_attn_layer:
+                    print('Decoder: Start sharing both feed-forward network and attention in this layer.')
+                    self.layers.append(share_decoder_ffn_attn_layer)
+                else:
+                    print('Decoder: Create a new layer.')
+                    self.layers.append(self.build_decoder_layer(cfg, no_encoder_attn))
+        else:
+            self.layers.extend(
+                [
+                    self.build_decoder_layer(cfg, no_encoder_attn)
+                    for _ in range(cfg.decoder.layers)
+                ]
+            )
+        # th-code
+
         self.num_layers = len(self.layers)
 
         if cfg.decoder.normalize_before and not cfg.no_decoder_final_norm:

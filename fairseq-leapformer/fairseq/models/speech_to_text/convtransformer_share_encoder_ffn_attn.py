@@ -161,14 +161,7 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             help="if True, share both feed-forward network and attention across layers",
         )
         parser.add_argument(
-            "--share-encoder-ffn-attn-layer",
-            nargs="+",
-            type=int,
-            metavar="INT INT",
-            help=":The list of sharing layers for both feed-forward network and attention. The range of layer number starts from 1, and the layer number which is over the range would not work.",
-        )
-        parser.add_argument(
-            "--share-decoder-ffn-attn-layer",
+            "--share-ffn-attn-layer",
             nargs="+",
             type=int,
             metavar="INT INT",
@@ -287,20 +280,20 @@ class ConvTransformerEncoder(FairseqEncoder):
         self.transformer_layers = nn.ModuleList([])
         # th-code
         if getattr(args, "share_ffn_attn", None):
-            print('Encoder: Start sharing both feed-forward network and attention.')
-            if getattr(args, "share_encoder_ffn_attn_layer", None):
-                lst_encoder_ffn_attn_layer = args.share_encoder_ffn_attn_layer
+            print('Start sharing both feed-forward and attention.')
+            if getattr(args, "share_ffn_attn_layer", None):
+                lst_ffn_attn_layer = args.share_ffn_attn_layer
             else:
-                lst_encoder_ffn_attn_layer = []
+                lst_ffn_attn_layer = []
 
-            print('Encoder: Sharing the list of layers: ', lst_encoder_ffn_attn_layer)
-            share_encoder_ffn_attn_layer = TransformerEncoderLayer(args)
+            print('Sharing the list of layers: ', lst_ffn_attn_layer)
+            share_ffn_attn_layer = TransformerEncoderLayer(args)
             for i in range(args.encoder_layers):
-                if i+1 in lst_encoder_ffn_attn_layer:
-                    print('Encoder: Start sharing both feed-forward network and attention in this layer.')
-                    self.transformer_layers.append(share_encoder_ffn_attn_layer)
+                if i+1 in lst_ffn_attn_layer:
+                    print('Start sharing both feed-forward network and attention in this layer.')
+                    self.transformer_layers.append(share_ffn_attn_layer)
                 else:
-                    print('Encoder: Create a new layer.')
+                    print('Create a new layer.')
                     self.transformer_layers.append(TransformerEncoderLayer(args))
         else:
             self.transformer_layers.extend(
