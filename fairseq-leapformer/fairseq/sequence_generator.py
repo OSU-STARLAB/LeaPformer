@@ -171,7 +171,9 @@ class SequenceGenerator(nn.Module):
                 yield id, src, ref, hypos[i]
 
     @torch.no_grad()
-    def generate(self, models, sample: Dict[str, Dict[str, Tensor]], **kwargs) -> List[List[Dict[str, Tensor]]]:
+    def generate(
+        self, models, sample: Dict[str, Dict[str, Tensor]], **kwargs
+    ) -> List[List[Dict[str, Tensor]]]:
         """Generate translations. Match the api of other fairseq generators.
 
         Args:
@@ -223,7 +225,10 @@ class SequenceGenerator(nn.Module):
                 else torch.tensor(src_tokens.size(-1)).to(src_tokens)
             )
         else:
-            raise Exception("expected src_tokens or source in net input. input keys: " + str(net_input.keys()))
+            raise Exception(
+                "expected src_tokens or source in net input. input keys: "
+                + str(net_input.keys())
+            )
 
         # bsz: total number of sentences in beam
         # Note that src_tokens may have more than 2 dimensions (i.e. audio features)
@@ -328,7 +333,9 @@ class SequenceGenerator(nn.Module):
                 encoder_outs = self.model.reorder_encoder_out(
                     encoder_outs, reorder_state
                 )
-            with torch.autograd.profiler.record_function("EnsembleModel: forward_decoder"):
+            with torch.autograd.profiler.record_function(
+                "EnsembleModel: forward_decoder"
+            ):
                 lprobs, avg_attn_scores = self.model.forward_decoder(
                     tokens[:, : step + 1],
                     encoder_outs,
@@ -656,7 +663,7 @@ class SequenceGenerator(nn.Module):
                 cum_unfin.append(prev)
         cum_fin_tensor = torch.tensor(cum_unfin, dtype=torch.int).to(bbsz_idx)
 
-        unfin_idx = bbsz_idx // beam_size
+        unfin_idx = torch.div(bbsz_idx, beam_size, rounding_mode='trunc')
         sent = unfin_idx + torch.index_select(cum_fin_tensor, 0, unfin_idx)
 
         # Create a set of "{sent}{unfin_idx}", where
@@ -752,7 +759,14 @@ class EnsembleModel(nn.Module):
         return self.has_incremental
 
     def max_decoder_positions(self):
-        return min([m.max_decoder_positions() for m in self.models if hasattr(m, "max_decoder_positions")] + [sys.maxsize])
+        return min(
+            [
+                m.max_decoder_positions()
+                for m in self.models
+                if hasattr(m, "max_decoder_positions")
+            ]
+            + [sys.maxsize]
+        )
 
     @torch.jit.export
     def forward_encoder(self, net_input: Dict[str, Tensor]):

@@ -7,16 +7,17 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+
 from fairseq import utils
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqEncoderDecoderModel
 from fairseq.models.transformer import (
-    TransformerEncoderBase,
-    TransformerDecoderBase,
     TransformerConfig,
+    TransformerDecoderBase,
+    TransformerEncoderBase,
 )
-from torch import Tensor
 
 
 class TransformerModelBase(FairseqEncoderDecoderModel):
@@ -41,8 +42,8 @@ class TransformerModelBase(FairseqEncoderDecoderModel):
         self.cfg = cfg
         self.supports_align_args = True
 
-    @staticmethod
-    def add_args(parser):
+    @classmethod
+    def add_args(cls, parser):
         """Add model-specific arguments to the parser."""
         # we want to build the args recursively in this case.
         gen_parser_from_dataclass(
@@ -174,6 +175,6 @@ class TransformerModelBase(FairseqEncoderDecoderModel):
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
-    nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
+    nn.init.normal_(m.weight, mean=0, std=embedding_dim**-0.5)
     nn.init.constant_(m.weight[padding_idx], 0)
     return m

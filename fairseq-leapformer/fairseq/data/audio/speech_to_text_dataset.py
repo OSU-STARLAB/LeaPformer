@@ -8,133 +8,29 @@ import io
 import logging
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, NamedTuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
-from fairseq.data import (
-    ConcatDataset,
-    Dictionary,
-    FairseqDataset,
-    ResamplingDataset,
-    data_utils as fairseq_data_utils,
-)
+import torch.nn.functional as F
+
+from fairseq.data import ConcatDataset, Dictionary, FairseqDataset, ResamplingDataset
+from fairseq.data import data_utils as fairseq_data_utils
 from fairseq.data.audio.audio_utils import (
+    FEATURE_OR_SF_AUDIO_FILE_EXTENSIONS,
     get_fbank,
     get_waveform,
-    read_from_stored_zip,
     is_npy_data,
     is_sf_audio_data,
     parse_path,
-    FEATURE_OR_SF_AUDIO_FILE_EXTENSIONS,
+    read_from_stored_zip,
 )
+from fairseq.data.audio.data_cfg import S2TDataConfig
 from fairseq.data.audio.feature_transforms import CompositeAudioFeatureTransform
 
-
 logger = logging.getLogger(__name__)
-
-
-class S2TDataConfig(object):
-    """Wrapper class for data config YAML"""
-
-    def __init__(self, yaml_path: Path):
-        try:
-            import yaml
-        except ImportError:
-            print("Please install PyYAML to load YAML files for S2T data config")
-        self.config = {}
-        if yaml_path.is_file():
-            try:
-                with open(yaml_path) as f:
-                    self.config = yaml.load(f, Loader=yaml.FullLoader)
-            except Exception as e:
-                raise Exception(
-                    f"Failed to load config from {yaml_path.as_posix()}: {e}"
-                )
-        else:
-            raise FileNotFoundError(f"{yaml_path.as_posix()} not found")
-
-    @property
-    def vocab_filename(self):
-        """fairseq vocabulary file under data root"""
-        return self.config.get("vocab_filename", "dict.txt")
-
-    @property
-    def shuffle(self) -> bool:
-        """Shuffle dataset samples before batching"""
-        return self.config.get("shuffle", False)
-
-    @property
-    def pre_tokenizer(self) -> Dict:
-        """Pre-tokenizer to apply before subword tokenization. Returning
-        a dictionary with `tokenizer` providing the tokenizer name and
-        the other items providing the tokenizer-specific arguments.
-        Tokenizers are defined in `fairseq.data.encoders.*`"""
-        return self.config.get("pre_tokenizer", {"tokenizer": None})
-
-    @property
-    def bpe_tokenizer(self) -> Dict:
-        """Subword tokenizer to apply after pre-tokenization. Returning
-        a dictionary with `bpe` providing the tokenizer name and
-        the other items providing the tokenizer-specific arguments.
-        Tokenizers are defined in `fairseq.data.encoders.*`"""
-        return self.config.get("bpe_tokenizer", {"bpe": None})
-
-    @property
-    def prepend_tgt_lang_tag(self) -> bool:
-        """Prepend target lang ID token as the target BOS (e.g. for to-many
-        multilingual setting). During inference, this requires `--prefix-size 1`
-        to force BOS to be lang ID token."""
-        return self.config.get("prepend_tgt_lang_tag", False)
-
-    @property
-    def input_feat_per_channel(self):
-        """The dimension of input features (per audio channel)"""
-        return self.config.get("input_feat_per_channel", 80)
-
-    @property
-    def input_channels(self):
-        """The number of channels in the input audio"""
-        return self.config.get("input_channels", 1)
-
-    @property
-    def sampling_alpha(self):
-        """Hyper-parameter alpha = 1/T for temperature-based resampling.
-        (alpha = 1 for no resampling)"""
-        return self.config.get("sampling_alpha", 1.0)
-
-    @property
-    def use_audio_input(self):
-        """Needed by the dataset loader to see if the model requires
-        raw audio as inputs."""
-        return self.config.get("use_audio_input", False)
-
-    @property
-    def use_sample_rate(self):
-        """Needed by the dataset loader to see if the model requires
-        raw audio with specific sample rate as inputs."""
-        return self.config.get("use_sample_rate", 16000)
-
-    @property
-    def audio_root(self):
-        """Audio paths in the manifest TSV can be relative and this provides
-        the root path. Set this to empty string when using absolute paths."""
-        return self.config.get("audio_root", "")
-
-    def get_feature_transforms(self, split, is_train):
-        """Split-specific feature transforms. Allowing train set wildcard `_train`,
-        evaluation set wildcard `_eval` and general wildcard `*` for matching."""
-        from copy import deepcopy
-
-        cfg = deepcopy(self.config)
-        _cur = cfg.get("transforms", {})
-        cur = _cur.get(split)
-        cur = _cur.get("_train") if cur is None and is_train else cur
-        cur = _cur.get("_eval") if cur is None and not is_train else cur
-        cur = _cur.get("*") if cur is None else cur
-        cfg["transforms"] = cur
-        return cfg
 
 
 def get_features_from_npy_or_audio(path):
@@ -149,7 +45,7 @@ def get_features_or_waveform_from_stored_zip(
     byte_offset,
     byte_size,
     need_waveform=False,
-    use_sample_rate=-1,
+    use_sample_rate=None,
 ):
     assert path.endswith(".zip")
     data = read_from_stored_zip(path, byte_offset, byte_size)
@@ -167,7 +63,7 @@ def get_features_or_waveform_from_stored_zip(
     return features_or_waveform
 
 
-def get_features_or_waveform(path: str, need_waveform=False, use_sample_rate=-1):
+def get_features_or_waveform(path: str, need_waveform=False, use_sample_rate=None):
     """Get speech features from .npy file or waveform from .wav/.flac file.
     The file may be inside an uncompressed ZIP file and is accessed via byte
     offset and length.
@@ -223,10 +119,12 @@ def _collate_frames(
     return out
 
 
-class SpeechToTextDatasetItem(NamedTuple):
+@dataclass
+class SpeechToTextDatasetItem(object):
     index: int
     source: torch.Tensor
     target: Optional[torch.Tensor] = None
+    speaker_id: Optional[int] = None
 
 
 class SpeechToTextDataset(FairseqDataset):
@@ -248,6 +146,9 @@ class SpeechToTextDataset(FairseqDataset):
         tgt_dict: Optional[Dictionary] = None,
         pre_tokenizer=None,
         bpe_tokenizer=None,
+        n_frames_per_step=1,
+        speaker_to_id=None,
+        append_eos=True,
     ):
         self.split, self.is_train_split = split, is_train_split
         self.cfg = cfg
@@ -265,6 +166,7 @@ class SpeechToTextDataset(FairseqDataset):
         )
         self.src_texts, self.tgt_texts = src_texts, tgt_texts
         self.src_langs, self.tgt_langs = src_langs, tgt_langs
+        self.speakers = speakers
         self.tgt_dict = tgt_dict
         self.check_tgt_lang_tag()
         self.ids = ids
@@ -276,8 +178,11 @@ class SpeechToTextDataset(FairseqDataset):
 
         self.pre_tokenizer = pre_tokenizer
         self.bpe_tokenizer = bpe_tokenizer
+        self.n_frames_per_step = n_frames_per_step
+        self.speaker_to_id = speaker_to_id
 
         self.tgt_lens = self.get_tgt_lens_and_check_oov()
+        self.append_eos = append_eos
 
         logger.info(self.__repr__())
 
@@ -302,9 +207,10 @@ class SpeechToTextDataset(FairseqDataset):
     def __repr__(self):
         return (
             self.__class__.__name__
-            + f'(split="{self.split}", n_samples={self.n_samples}, '
+            + f'(split="{self.split}", n_samples={self.n_samples:_}, '
             f"prepend_tgt_lang_tag={self.cfg.prepend_tgt_lang_tag}, "
-            f"shuffle={self.shuffle}, transforms={self.feature_transforms})"
+            f"shuffle={self.shuffle}, transforms={self.feature_transforms}, "
+            f"n_frames_per_step={self.n_frames_per_step}"
         )
 
     @classmethod
@@ -329,28 +235,45 @@ class SpeechToTextDataset(FairseqDataset):
         text = self.tokenize(self.bpe_tokenizer, text)
         return text
 
+    def pack_frames(self, feature: torch.Tensor):
+        if self.n_frames_per_step == 1:
+            return feature
+        n_packed_frames = feature.shape[0] // self.n_frames_per_step
+        feature = feature[: self.n_frames_per_step * n_packed_frames]
+        return feature.reshape(n_packed_frames, -1)
+
     @classmethod
     def get_lang_tag_idx(cls, lang: str, dictionary: Dictionary):
         lang_tag_idx = dictionary.index(cls.LANG_TAG_TEMPLATE.format(lang))
         assert lang_tag_idx != dictionary.unk()
         return lang_tag_idx
 
-    def __getitem__(self, index: int) -> SpeechToTextDatasetItem:
+    def _get_source_audio(self, index: int) -> torch.Tensor:
         source = get_features_or_waveform(
             self.audio_paths[index],
             need_waveform=self.cfg.use_audio_input,
             use_sample_rate=self.cfg.use_sample_rate,
         )
-        if self.feature_transforms is not None:
-            assert not self.cfg.use_audio_input
-            source = self.feature_transforms(source)
-        source = torch.from_numpy(source).float()
+        if self.cfg.use_audio_input:
+            source = torch.from_numpy(source).float()
+            if self.cfg.standardize_audio:
+                with torch.no_grad():
+                    source = F.layer_norm(source, source.shape)
+        else:
+            if self.feature_transforms is not None:
+                source = self.feature_transforms(source)
+            source = torch.from_numpy(source).float()
+        return source
+
+    def __getitem__(self, index: int) -> SpeechToTextDatasetItem:
+        source = self._get_source_audio(index)
+        source = self.pack_frames(source)
 
         target = None
         if self.tgt_texts is not None:
             tokenized = self.get_tokenized_tgt_text(index)
             target = self.tgt_dict.encode_line(
-                tokenized, add_if_not_exist=False, append_eos=True
+                tokenized, add_if_not_exist=False, append_eos=self.append_eos
             ).long()
             if self.cfg.prepend_tgt_lang_tag:
                 lang_tag_idx = self.get_lang_tag_idx(
@@ -358,7 +281,12 @@ class SpeechToTextDataset(FairseqDataset):
                 )
                 target = torch.cat((torch.LongTensor([lang_tag_idx]), target), 0)
 
-        return SpeechToTextDatasetItem(index=index, source=source, target=target)
+        speaker_id = None
+        if self.speaker_to_id is not None:
+            speaker_id = self.speaker_to_id[self.speakers[index]]
+        return SpeechToTextDatasetItem(
+            index=index, source=source, target=target, speaker_id=speaker_id
+        )
 
     def __len__(self):
         return self.n_samples
@@ -371,7 +299,7 @@ class SpeechToTextDataset(FairseqDataset):
         indices = torch.tensor([x.index for x in samples], dtype=torch.long)
         frames = _collate_frames([x.source for x in samples], self.cfg.use_audio_input)
         # sort samples by descending number of frames
-        n_frames = torch.tensor([x.source.size()[0] for x in samples], dtype=torch.long)
+        n_frames = torch.tensor([x.source.size(0) for x in samples], dtype=torch.long)
         n_frames, order = n_frames.sort(descending=True)
         indices = indices.index_select(0, order)
         frames = frames.index_select(0, order)
@@ -389,7 +317,7 @@ class SpeechToTextDataset(FairseqDataset):
             )
             target = target.index_select(0, order)
             target_lengths = torch.tensor(
-                [x.target.size()[0] for x in samples], dtype=torch.long
+                [x.target.size(0) for x in samples], dtype=torch.long
             ).index_select(0, order)
             prev_output_tokens = fairseq_data_utils.collate_tokens(
                 [x.target for x in samples],
@@ -399,7 +327,15 @@ class SpeechToTextDataset(FairseqDataset):
                 move_eos_to_beginning=True,
             )
             prev_output_tokens = prev_output_tokens.index_select(0, order)
-            ntokens = sum(x.target.size()[0] for x in samples)
+            ntokens = sum(x.target.size(0) for x in samples)
+
+        speaker = None
+        if self.speaker_to_id is not None:
+            speaker = (
+                torch.tensor([s.speaker_id for s in samples], dtype=torch.long)
+                .index_select(0, order)
+                .view(-1, 1)
+            )
 
         net_input = {
             "src_tokens": frames,
@@ -409,6 +345,7 @@ class SpeechToTextDataset(FairseqDataset):
         out = {
             "id": indices,
             "net_input": net_input,
+            "speaker": speaker,
             "target": target,
             "target_lengths": target_lengths,
             "ntokens": ntokens,
@@ -465,6 +402,8 @@ class SpeechToTextDatasetCreator(object):
         tgt_dict,
         pre_tokenizer,
         bpe_tokenizer,
+        n_frames_per_step,
+        speaker_to_id,
     ) -> SpeechToTextDataset:
         audio_root = Path(cfg.audio_root)
         ids = [s[cls.KEY_ID] for s in samples]
@@ -490,6 +429,8 @@ class SpeechToTextDatasetCreator(object):
             tgt_dict=tgt_dict,
             pre_tokenizer=pre_tokenizer,
             bpe_tokenizer=bpe_tokenizer,
+            n_frames_per_step=n_frames_per_step,
+            speaker_to_id=speaker_to_id,
         )
 
     @classmethod
@@ -509,7 +450,7 @@ class SpeechToTextDatasetCreator(object):
 
         sz_sum = sum(v for v in lp_to_sz.values())
         lp_to_prob = {k: v / sz_sum for k, v in lp_to_sz.items()}
-        lp_to_tgt_prob = {k: v ** alpha for k, v in lp_to_prob.items()}
+        lp_to_tgt_prob = {k: v**alpha for k, v in lp_to_prob.items()}
         prob_sum = sum(v for v in lp_to_tgt_prob.values())
         lp_to_tgt_prob = {k: v / prob_sum for k, v in lp_to_tgt_prob.items()}
         lp_to_sz_ratio = {
@@ -554,10 +495,20 @@ class SpeechToTextDatasetCreator(object):
         is_train_split: bool,
         pre_tokenizer,
         bpe_tokenizer,
+        n_frames_per_step,
+        speaker_to_id,
     ) -> SpeechToTextDataset:
         samples = cls._load_samples_from_tsv(root, split)
         return cls._from_list(
-            split, is_train_split, samples, cfg, tgt_dict, pre_tokenizer, bpe_tokenizer
+            split,
+            is_train_split,
+            samples,
+            cfg,
+            tgt_dict,
+            pre_tokenizer,
+            bpe_tokenizer,
+            n_frames_per_step,
+            speaker_to_id,
         )
 
     @classmethod
@@ -572,10 +523,20 @@ class SpeechToTextDatasetCreator(object):
         is_train_split: bool,
         epoch: int,
         seed: int,
+        n_frames_per_step: int = 1,
+        speaker_to_id=None,
     ) -> SpeechToTextDataset:
         datasets = [
             cls._from_tsv(
-                root, cfg, split, tgt_dict, is_train_split, pre_tokenizer, bpe_tokenizer
+                root,
+                cfg,
+                split,
+                tgt_dict,
+                is_train_split,
+                pre_tokenizer,
+                bpe_tokenizer,
+                n_frames_per_step,
+                speaker_to_id,
             )
             for split in splits.split(",")
         ]

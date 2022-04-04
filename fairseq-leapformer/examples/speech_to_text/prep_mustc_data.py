@@ -12,11 +12,12 @@ import shutil
 from itertools import groupby
 from tempfile import NamedTemporaryFile
 from typing import Tuple
+import re
 
 import numpy as np
 import pandas as pd
 import soundfile as sf
-from examples.speech_to_text.data_utils import (
+from examples.speech_to_text.data_utils_prep import (
     create_zip,
     extract_fbank_features,
     filter_manifest_df,
@@ -31,7 +32,7 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from fairseq.data.audio.audio_utils import get_waveform
+from fairseq.data.audio.audio_utils_prep import get_waveform
 
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ class MUSTC(Dataset):
                 utterances = [r.strip() for r in f]
             assert len(segments) == len(utterances)
             for i, u in enumerate(utterances):
+                u = self.edit_utterance(u)
                 segments[i][_lang] = u
         # Gather info
         self.data = []
@@ -101,6 +103,205 @@ class MUSTC(Dataset):
     def __len__(self) -> int:
         return len(self.data)
 
+    #Edits the utterance by removing unecessary punctuations and adding special characters      
+    def edit_utterance(self, utterance):
+        #Removes punctuation
+        utterance = utterance.replace(" -- ", " ")
+        utterance = utterance.replace("--", "")
+        utterance = utterance.replace("[", "")
+        utterance = utterance.replace("]", "")
+        utterance = utterance.replace("\"", "")
+        utterance = utterance.replace(",", "")
+        #utterance = utterance.replace("'", "")
+        utterance = utterance.replace(";", "")
+        utterance = utterance.replace("-", " ")
+        utterance = utterance.replace("(Video) ", "")
+        utterance = utterance.replace("(Audio) ", "")
+        utterance = utterance.replace(" / ", " ")  
+        utterance = utterance.replace("’", "'")
+        utterance = re.sub("\u266A", " ", utterance)	# Remove music note
+        utterance = re.sub("\u266B", " ", utterance)	# Remove music note
+        #Complicated edits to utterance
+        utterance = self.fix_and_remove_apostrophes(utterance)
+        utterance = self.remove_repeating_end(utterance)
+        #utterance = self.get_terminator_sentence(utterance)
+        utterance = self.remove_speaker_initials(utterance)
+        utterance = self.remove_speaker_two_name(utterance)
+        utterance = self.replace_pauses(utterance)
+
+        utterance = utterance.replace(":", "")
+        utterance = utterance.strip()                    # Clean up white space at start/end of sentence
+        utterance = ' '.join(utterance.split())          # Clean up white space within sentence
+        return utterance
+
+    #Replaces all values enclosed in () and starting with a capital letter to <0>
+    def replace_pauses(self, utterance):
+        #Provides number of ( in utterance
+        pause_count = utterance.count("(")
+        #Conditional satisfied if number of ( is greater than 0
+        if pause_count > 0:
+            #Loops for number of pause_count
+            for i in range(pause_count):
+                #Finds starting and ending index of pause
+                index_start = utterance.find("(")
+                index_end = utterance.find(")")
+                #Replaces pause with <0> if first letter is capitalized
+                if utterance[index_start+1].isupper():
+                    utterance = utterance[:index_start] + "<0>" + utterance[index_end+1:]
+        return utterance
+        
+    def fix_and_remove_apostrophes(self, utterance):
+        # First loop: fix apostrophes
+        #Finds index of first apostrophe
+        index = utterance.find("'")
+        while index != -1:
+            # One condition to fix:
+            # apostrophe has char + space before and space + word after, with word after being <= 2 chars (most likely contraction or possession)
+            # e.g., They ' re , We ' ve , He ' s   
+            if (index-2 >=0 and index+3 < len(utterance)) and \
+              (utterance[index-2].isalpha() and utterance[index-1]==' ' and utterance[index+1]==' ' and utterance[index+2].isalpha() and utterance[index+3]==' '):
+                utterance = utterance[:index-1] + "'" + utterance[index+2:] # Chop out spaces
+            elif (index-2 >=0 and index+4 < len(utterance)) and \
+              (utterance[index-2].isalpha() and utterance[index-1]==' ' and utterance[index+1]==' ' and utterance[index+2].isalpha() and utterance[index+3].isalpha() and utterance[index+4]==' '):
+                utterance = utterance[:index-1] + "'" + utterance[index+2:] # Chop out spaces
+            index+=1
+            index = utterance.find("'", index)   
+                
+        # Second loop: remove undesired apostrophes
+        #Finds index of first '
+        index = utterance.find("'")
+        while index != -1:
+            # Only two allowed conditions:
+            # 1) after any alpha + "s" and before space (e.g., childrens' )
+            # 2) between two alpha chars (e.g., He's )
+            if (index-2 >= 0 and index+1 < len(utterance)) and \
+              (utterance[index-2].isalpha() and utterance[index-1] == 's' and utterance[index+1]==' '):
+                index += 1
+                pass
+            elif (index-1 >= 0 and index+1 < len(utterance)) and \
+              (utterance[index-1].isalpha() and utterance[index+1].isalpha()):
+                index += 1
+                pass
+            else:
+                utterance = utterance[:index] + utterance[index+1:]
+            index = utterance.find("'", index)
+        return utterance
+
+    #Adds </s> after end_character designated
+    def add_terminator(self, utterance, end_character):
+        #Finds index of first end_character
+        index = utterance.find(end_character)
+        #Repeats while end_character remaining
+        while index != -1:
+            index += 1
+            #Conditional satisfied if end_character is last in utterance
+            if index == len(utterance):
+                utterance = utterance + "</s>"
+                return utterance
+            #Conditional satisfied if first letter after end_character is capitalized, or is a digit, or is a special character not including a period.
+            elif index + 1 < len(utterance) and (utterance[index + 1].isupper() or utterance[index + 1].isdigit() or (not utterance[index + 1].isalnum() and utterance[index + 1] != ".")):
+                utterance = utterance[:index] + "</s>" + utterance[index:]
+            index = utterance.find(end_character, index)
+        return utterance
+
+    #Places a terminating character after sentences ending with .,!, and ?
+    def get_terminator_sentence(self, utterance):
+        utterance = self.add_terminator(utterance, ".")
+        utterance = self.add_terminator(utterance, "?")
+        utterance = self.add_terminator(utterance, "!")
+        return utterance
+
+    #Removes the a speakers initials if it comes before a sentence
+    def remove_speaker_initials(self, utterance):
+        #Finds index of first :
+        index = utterance.find(":")
+        #Conditional satisfied if : located in utterance
+        if index != -1:
+            #Loops until index
+            for i in range(index):
+                #Continuesif character in utterance is capitalized
+                if utterance[i].isupper():
+                    continue
+                #Returns original utterance if not a capital letter(Not initials)
+                else:
+                    return utterance
+            return utterance[index+2:]
+        return utterance
+
+    #Removes the speakers first and last name from beginning of sentence
+    def remove_speaker_two_name(self, utterance):
+        #Finds index of : and space
+        index_colon = utterance.find(":")
+        index_space = utterance.find(" ")
+        #Condition satisfied if both : and space present
+        if index_space != -1 and index_colon != -1:
+            #Condition satisfied if index_space is less than index_colon and word after space is capital and is the only other word before the colon
+            if index_space < index_colon and utterance[index_space+1].isupper() and utterance[:index_colon].count(" ") <= 1:
+                return utterance[index_colon+2:]
+        return utterance
+
+    #Removes repeating characters at the end of a sentence
+    def remove_repeating_end(self, utterance):
+        utterance = self.convert_multi_characters(utterance, ".")
+        utterance = self.convert_multi_characters(utterance, "!")
+        utterance = self.convert_multi_characters(utterance, "?")
+        return utterance
+
+    #Removes a repeating character from the end of sentences
+    def convert_multi_characters(self, utterance, end_character):
+        start_idx = end_idx = 0
+        #Loop executes while there are still repeating end characters
+        while utterance.count(end_character + end_character) != 0:
+            #Finds the index of next end_character
+            start_idx = end_idx = utterance.find(end_character, end_idx)
+            #Finds index of the character after end_character
+            while end_idx < len(utterance) and utterance[end_idx] == end_character:
+                end_idx += 1
+            # If not repeating character, no need to check anything so go to next loop
+            if end_idx - start_idx == 1:
+                continue
+
+            #Conditional satisfied if not at end of sentence
+            if end_idx < len(utterance):
+                # Conditional satisfied if the following character is a number (e.g., 1.7 billion) or
+                # a space at the end (blank caused by prior processing) or
+                # the following character + 1 is a capital (e.g., "Good ... Let's do that.") or non-period special character
+                if utterance[end_idx].isdigit() or \
+                  (utterance[end_idx] == ' ' and end_idx + 1 == len(utterance)) or \
+                  (end_idx + 1 < len(utterance) and (utterance[end_idx + 1].isupper() or (not utterance[end_idx + 1].isalnum() and utterance[end_idx + 1] != "."))):
+                    utterance = utterance[0:start_idx] + end_character + utterance[end_idx:]
+                else:
+                    utterance = utterance[0:start_idx] + utterance[end_idx:]
+            #Conditional satisfied if at end of sentence
+            elif end_idx == len(utterance):
+                utterance = utterance[0:start_idx] + end_character
+        return utterance
+
+    #Returns the count of the number of sentences in an utterance
+    def get_sentence_count(self, utterance):
+        sentence_count = 0
+        sentence_count = self.increase_sentence_count(utterance, ".", sentence_count)
+        sentence_count = self.increase_sentence_count(utterance, "?", sentence_count)
+        sentence_count = self.increase_sentence_count(utterance, "!", sentence_count)
+        return sentence_count
+
+    #Returns the new sentence_count
+    def increase_sentence_count(self, utterance, end_character, sentence_count):
+        #Finds the index of the end_character
+        index = utterance.find(end_character)
+        #Repeats while more end_character remain
+        while index != -1:
+            index += 1
+            #Conditional satisfied if index equal to length of utterance
+            if index == len(utterance):
+                sentence_count += 1
+                return sentence_count
+            #Conditional satisfied index less than length of utterance and is capital, or a digit, or a special character that is not a period. 
+            elif index + 1 < len(utterance) and (utterance[index + 1].isupper() or utterance[index + 1].isdigit() or (not utterance[index + 1].isalnum() and utterance[index + 1] != ".")):
+                sentence_count += 1
+            #Finds the index of the next end_character
+            index = utterance.find(end_character, index)
+        return sentence_count
 
 def process(args):
     root = Path(args.data_root).absolute()
@@ -113,11 +314,11 @@ def process(args):
         feature_root = cur_root / "fbank80"
         feature_root.mkdir(exist_ok=True)
         for split in MUSTC.SPLITS:
-            print(f"Fetching split {split}...")
+            print(f"Fetching split {split}...", flush=True)
             dataset = MUSTC(root.as_posix(), lang, split)
-            print("Extracting log mel filter bank features...")
+            print("Extracting log mel filter bank features...", flush=True)
             if split == 'train' and args.cmvn_type == "global":
-                print("And estimating cepstral mean and variance stats...")
+                print("And estimating cepstral mean and variance stats...", flush=True)
                 gcmvn_feature_list = []
 
             for waveform, sample_rate, _, _, _, utt_id in tqdm(dataset):
@@ -140,7 +341,7 @@ def process(args):
 
         # Pack features into ZIP
         zip_path = cur_root / "fbank80.zip"
-        print("ZIPing features...")
+        print("ZIPing features...", flush=True)
         create_zip(feature_root, zip_path)
         print("Fetching ZIP manifest...")
         zip_manifest = get_zip_manifest(zip_path)

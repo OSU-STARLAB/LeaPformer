@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+
 from fairseq import utils
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqIncrementalDecoder
@@ -20,17 +22,16 @@ from fairseq.modules import (
     LayerNorm,
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
+    transformer_layer,
 )
-from fairseq.modules import transformer_layer
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
-from torch import Tensor
 
 
 # rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
-    if module_name == 'TransformerDecoderBase':
-        return 'TransformerDecoder'
+    if module_name == "TransformerDecoderBase":
+        return "TransformerDecoder"
     else:
         return module_name
 
@@ -114,33 +115,12 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             self.layers = LayerDropModuleList(p=self.decoder_layerdrop)
         else:
             self.layers = nn.ModuleList([])
-
-        # th-code
-        if cfg.share_ffn_attn:
-            print('Decoder: Start sharing both feed-forward network and attention.')
-            if cfg.share_decoder_ffn_attn_layer is not None:
-                lst_decoder_ffn_attn_layer = cfg.share_decoder_ffn_attn_layer
-            else:
-                lst_decoder_ffn_attn_layer = []
-
-            print('Decoder: Sharing the list of layers: ', lst_decoder_ffn_attn_layer)
-            share_decoder_ffn_attn_layer = self.build_decoder_layer(cfg, no_encoder_attn)
-            for i in range(cfg.decoder.layers):
-                if i+1 in lst_decoder_ffn_attn_layer:
-                    print('Decoder: Start sharing both feed-forward network and attention in this layer.')
-                    self.layers.append(share_decoder_ffn_attn_layer)
-                else:
-                    print('Decoder: Create a new layer.')
-                    self.layers.append(self.build_decoder_layer(cfg, no_encoder_attn))
-        else:
-            self.layers.extend(
-                [
-                    self.build_decoder_layer(cfg, no_encoder_attn)
-                    for _ in range(cfg.decoder.layers)
-                ]
-            )
-        # th-code
-
+        self.layers.extend(
+            [
+                self.build_decoder_layer(cfg, no_encoder_attn)
+                for _ in range(cfg.decoder.layers)
+            ]
+        )
         self.num_layers = len(self.layers)
 
         if cfg.decoder.normalize_before and not cfg.no_decoder_final_norm:
@@ -182,7 +162,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
                 self.output_embed_dim, len(dictionary), bias=False
             )
             nn.init.normal_(
-                self.output_projection.weight, mean=0, std=self.output_embed_dim ** -0.5
+                self.output_projection.weight, mean=0, std=self.output_embed_dim**-0.5
             )
         num_base_layers = cfg.base_layers
         for i in range(num_base_layers):

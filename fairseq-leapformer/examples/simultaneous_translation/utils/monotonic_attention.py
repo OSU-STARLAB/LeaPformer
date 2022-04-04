@@ -8,6 +8,9 @@ from examples.simultaneous_translation.utils.functions import (
     moving_sum,
 )
 
+import torch.utils.cpp_extension
+from pathlib import Path
+
 
 def expected_alignment_from_p_choose(
     p_choose: Tensor,
@@ -31,6 +34,27 @@ def expected_alignment_from_p_choose(
     Expected input size
     p_choose: bsz, tgt_len, src_len
     """
+    module_path = Path(__file__).parent.parent.parent / "operators"
+    build_path = module_path / "build"
+    build_path.mkdir(exist_ok=True)
+
+    alignment_train_cpu_binding = torch.utils.cpp_extension.load(
+        "alignment_train_cpu_binding",
+        sources=[
+            module_path / "alignment_train_cpu.cpp",
+        ],
+        build_directory=build_path.as_posix()
+    )
+
+    alignment_train_cuda_binding = torch.utils.cpp_extension.load(
+        "alignment_train_cuda_binding",
+        sources=[
+            module_path / "alignment_train_cuda.cpp",
+            module_path / "alignment_train_kernel.cu"
+        ],
+        build_directory=build_path.as_posix()
+    )
+
     prob_check(p_choose)
 
     # p_choose: bsz, tgt_len, src_len
@@ -42,32 +66,16 @@ def expected_alignment_from_p_choose(
     if padding_mask is not None:
         p_choose = p_choose.masked_fill(padding_mask.unsqueeze(1), 0.0)
 
-    # cumprod_1mp : bsz, tgt_len, src_len
-    cumprod_1mp = exclusive_cumprod(1 - p_choose, dim=2, eps=eps)
-    cumprod_1mp_clamp = torch.clamp(cumprod_1mp, eps, 1.0)
-
-    alpha_0 = p_choose.new_zeros([bsz, 1, src_len])
-    alpha_0[:, :, 0] = 1.0
-
-    previous_alpha = [alpha_0]
-
-    for i in range(tgt_len):
-        # p_choose: bsz , tgt_len, src_len
-        # cumprod_1mp_clamp : bsz, tgt_len, src_len
-        # previous_alpha[i]: bsz, 1, src_len
-        # alpha_i: bsz, src_len
-        alpha_i = (
-            p_choose[:, i]
-            * cumprod_1mp[:, i]
-            * torch.cumsum(
-                previous_alpha[i][:, 0] / cumprod_1mp_clamp[:, i], dim=1
-            )
-        ).clamp(0, 1.0)
-
-        previous_alpha.append(alpha_i.unsqueeze(1))
-
-    # alpha: bsz * num_heads, tgt_len, src_len
-    alpha = torch.cat(previous_alpha[1:], dim=1)
+    alpha = p_choose.new_zeros([bsz, tgt_len, src_len])
+    if p_choose.is_cuda:
+        p_choose = p_choose.contiguous()
+        alignment_train_cuda_binding.alignment_train_cuda(p_choose, alpha, eps)
+        # from alignment_train_cuda_binding import alignment_train_cuda as alignment_train
+    else:
+        alignment_train_cpu_binding.alignment_train_cpu(p_choose, alpha, eps)
+        # from alignment_train_cpu_binding import alignment_train_cpu as alignment_train
+    # alpha = p_choose.new_zeros([bsz, tgt_len, src_len])
+    # alignment_train(p_choose, alpha, eps)
 
     # Mix precision to prevent overflow for fp16
     alpha = alpha.type(dtype)
@@ -104,7 +112,8 @@ def expected_soft_attention(
     if padding_mask is not None:
         alpha = alpha.masked_fill(padding_mask.unsqueeze(1), 0.0)
         soft_energy = soft_energy.masked_fill(
-            padding_mask.unsqueeze(1), -float("inf")
+            padding_mask.unsqueeze(1),
+            -1e4 if soft_energy.dtype == torch.float16 else -1e8
         )
 
     prob_check(alpha)
@@ -144,6 +153,8 @@ def expected_soft_attention(
 
     # Mix precision to prevent overflow for fp16
     beta = beta.type(dtype)
+
+    beta = beta.clamp(0, 1)
 
     prob_check(beta)
 
@@ -188,8 +199,7 @@ def mass_preservation(
         src_lens = src_len - padding_mask.sum(dim=1, keepdim=True)
         src_lens = src_lens.expand(-1, tgt_len).contiguous()
         # add back the last value
-        residuals += alpha.gather(2, src_lens.unsqueeze(2) - 1)
-        alpha = alpha.scatter(2, src_lens.unsqueeze(2) - 1, residuals)
+        alpha = alpha.scatter_add(2, src_lens.unsqueeze(2) - 1, residuals)
 
         prob_check(alpha)
 
