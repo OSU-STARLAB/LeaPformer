@@ -121,6 +121,18 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             help="decoder output dimension (extra linear layer if different from decoder embed dim)",
         )
         parser.add_argument(
+            "--decoder-input-dim",
+            type=int,
+            metavar="N",
+            help="decoder input dimension (extra linear layer if different from decoder embed dim)",
+        )
+        parser.add_argument( # DP
+            "--token-embed-dim",
+            type=int,
+            metavar="N",
+            help="token embedding dimension (used with decoder-input-dim and decoder-output-dim for embedding matrix factorization)",
+        )
+        parser.add_argument(
             "--share-decoder-input-output-embed",
             action="store_true",
             help="share decoder input and output embeddings",
@@ -185,7 +197,7 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             return Embedding(num_embeddings, embed_dim, padding_idx)
 
         decoder_embed_tokens = build_embedding(
-            task.target_dictionary, args.decoder_embed_dim
+            task.target_dictionary, args.token_embed_dim # DP
         )
         encoder = cls.build_encoder(args)
         decoder = cls.build_decoder(args, task, decoder_embed_tokens)
@@ -467,10 +479,9 @@ def base_architecture(args):
     args.adaptive_input = getattr(args, "adaptive_input", False)
     args.decoder_layerdrop = getattr(args, "decoder_layerdrop", 0.0)
 
-    args.decoder_output_dim = getattr(
-        args, "decoder_output_dim", args.decoder_embed_dim
-    )
-    args.decoder_input_dim = getattr(args, "decoder_input_dim", args.decoder_embed_dim)
+    args.token_embed_dim = getattr(args, "token_embed_dim", args.decoder_embed_dim) # DP
+    args.decoder_output_dim = getattr(args, "decoder_output_dim", args.token_embed_dim) # DP
+    args.decoder_input_dim = getattr(args, "decoder_input_dim", args.token_embed_dim) # DP
     args.no_scale_embedding = getattr(args, "no_scale_embedding", False)
     args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
     args.max_source_positions = getattr(args, "max_source_positions", 3000)
