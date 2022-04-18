@@ -10,7 +10,27 @@ from examples.simultaneous_translation.utils.functions import (
 
 import torch.utils.cpp_extension
 from pathlib import Path
+    
+module_path = Path(__file__).parent.parent.parent / "operators"
+build_path = module_path / "build"
+build_path.mkdir(exist_ok=True)
 
+alignment_train_cpu_binding = torch.utils.cpp_extension.load(
+    "alignment_train_cpu_binding",
+    sources=[
+        module_path / "alignment_train_cpu.cpp",
+    ],
+    build_directory=build_path.as_posix()
+)
+
+alignment_train_cuda_binding = torch.utils.cpp_extension.load(
+    "alignment_train_cuda_binding",
+    sources=[
+        module_path / "alignment_train_cuda.cpp",
+        module_path / "alignment_train_kernel.cu"
+    ],
+    build_directory=build_path.as_posix()
+)
 
 def expected_alignment_from_p_choose(
     p_choose: Tensor,
@@ -34,26 +54,6 @@ def expected_alignment_from_p_choose(
     Expected input size
     p_choose: bsz, tgt_len, src_len
     """
-    module_path = Path(__file__).parent.parent.parent / "operators"
-    build_path = module_path / "build"
-    build_path.mkdir(exist_ok=True)
-
-    alignment_train_cpu_binding = torch.utils.cpp_extension.load(
-        "alignment_train_cpu_binding",
-        sources=[
-            module_path / "alignment_train_cpu.cpp",
-        ],
-        build_directory=build_path.as_posix()
-    )
-
-    alignment_train_cuda_binding = torch.utils.cpp_extension.load(
-        "alignment_train_cuda_binding",
-        sources=[
-            module_path / "alignment_train_cuda.cpp",
-            module_path / "alignment_train_kernel.cu"
-        ],
-        build_directory=build_path.as_posix()
-    )
 
     prob_check(p_choose)
 

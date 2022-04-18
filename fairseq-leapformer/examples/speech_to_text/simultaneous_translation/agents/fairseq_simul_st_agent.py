@@ -199,6 +199,8 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="Sample rate")
         parser.add_argument("--feature-dim", type=int, default=FEATURE_DIM,
                             help="Acoustic feature dimension.")
+        parser.add_argument("--waitk", type=int, default=None,
+                            help="Wait-k delay for evaluation")
 
         # fmt: on
         return parser
@@ -217,6 +219,9 @@ class FairseqSimulSTAgent(SpeechAgent):
         if args.config is not None:
             task_args.config_yaml = args.config
 
+        if args.waitk is not None:
+            state["cfg"]["model"].waitk_lagging = args.waitk
+        
         task = tasks.setup_task(task_args)
 
         # build model for ensemble
