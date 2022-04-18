@@ -232,6 +232,14 @@ class ConvTransformerEncoder(FairseqEncoder):
         """Construct an Encoder object."""
         super().__init__(None)
 
+        # DP
+        self.encoder_mask_future_delay = getattr(args, "encoder_mask_future_delay", float('inf'))
+        #if self.encoder_mask_future_delay is None: 
+        #    self.encoder_mask_future_delay = float('inf')
+        self.encoder_mask_block_size = getattr(args, "encoder_mask_block_size", 1)
+        #if self.encoder_mask_block_size is None:
+        #    self.encoder_mask_block_size = 1
+
         self.dropout = args.dropout
         self.embed_scale = (
             1.0 if args.no_scale_embedding else math.sqrt(args.encoder_embed_dim)
@@ -284,6 +292,37 @@ class ConvTransformerEncoder(FairseqEncoder):
         mb, seq = x.size()[:2]
         return x.contiguous().view(mb, seq, -1).size(-1)
 
+    def buffered_future_mask(self, tensor): # DP
+        dim = tensor.size(0)
+
+        if (self.encoder_mask_future_delay >= dim-1): # Full attention allowed, no need to check other conditions
+            self._future_mask = torch.zeros([dim, dim])
+        else: # Start with mask that disallows looking into future
+            tri_mask = torch.triu(
+                utils.fill_with_neg_inf(torch.zeros([dim, dim])), 1
+            )
+
+            delay = self.encoder_mask_future_delay
+            block_size = self.encoder_mask_block_size
+            block_count = dim // block_size
+            block_pad = dim % block_size
+            blocks = torch.full((block_count, block_size, block_size), 1, dtype=torch.bool)
+
+            # Create additional masks that consider self.encoder_mask_future_delay and self.encoder_mask_block_size
+            block_mask = torch.nn.functional.pad(input=torch.block_diag(*blocks), pad=(0, block_pad, 0, block_pad))
+            delay_mask = torch.cat(
+                (
+                    torch.full((dim,delay+1), 1, dtype=torch.bool),
+                    torch.zeros( (dim,dim-(delay+1)), dtype=torch.bool)
+                ), 1
+            )
+            corr_mask = torch.logical_or(block_mask, delay_mask)
+
+            self._future_mask = tri_mask.masked_fill_(corr_mask, 0) # Apply correction
+
+        self._future_mask = self._future_mask.to(tensor)
+        return self._future_mask[:dim, :dim]
+
     def forward(self, src_tokens, src_lengths):
         """Encode input sequence.
         :param torch.Tensor xs: input tensor
@@ -317,7 +356,7 @@ class ConvTransformerEncoder(FairseqEncoder):
         x = F.dropout(x, p=self.dropout, training=self.training)
 
         for layer in self.transformer_layers:
-            x = layer(x, encoder_padding_mask)
+            x = layer(x=x, encoder_padding_mask=encoder_padding_mask, attn_mask=self.buffered_future_mask(x))
 
         if not encoder_padding_mask.any():
             maybe_encoder_padding_mask = None

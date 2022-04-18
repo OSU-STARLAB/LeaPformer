@@ -45,6 +45,18 @@ class SimulConvTransformerModel(ConvTransformerModel):
             default=False,
             help="Only train monotonic attention",
         )
+        parser.add_argument( # DP
+            "--encoder-mask-future-delay",
+            type=int,
+            metavar="N",
+            help="Specify degree of attention into future when using encoder attention masking. Default=infinite (full attention)",
+        )
+        parser.add_argument( # DP
+            "--encoder-mask-block-size",
+            type=int,
+            metavar="N",
+            help="Specify size of input blocks for which block attention is allowed. Useful when inputs will be grouped following encoder (e.g., simultaneous translation using wait-k). Default=1 (no additional attention)",
+        )
 
     @classmethod
     def build_decoder(cls, args, task, embed_tokens):
