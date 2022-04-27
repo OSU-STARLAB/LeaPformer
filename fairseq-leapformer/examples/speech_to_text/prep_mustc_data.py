@@ -49,9 +49,9 @@ class MUSTC(Dataset):
     """
 
     SPLITS = ["train", "dev", "tst-COMMON", "tst-HE"]
-    LANGUAGES = ["de", "es", "fr", "it", "nl", "pt", "ro", "ru"]
+    LANGUAGES = ["de", "es", "fr", "it", "nl", "pt", "ro", "ru", "zh"]
 
-    def __init__(self, root: str, lang: str, split: str) -> None:
+    def __init__(self, root: str, lang: str, split: str, pair: bool) -> None:
         assert split in self.SPLITS and lang in self.LANGUAGES
         _root = Path(root) / f"en-{lang}" / "data" / split
         wav_root, txt_root = _root / "wav", _root / "txt"
@@ -69,8 +69,40 @@ class MUSTC(Dataset):
                 utterances = [r.strip() for r in f]
             assert len(segments) == len(utterances)
             for i, u in enumerate(utterances):
-                u = self.edit_utterance(u)
+                #print(f"O: {u}")
+                u = self.edit_utterance(u, _lang, pair)
+                #print(f"E: {u}", flush=True)
                 segments[i][_lang] = u
+
+        if pair:
+            # Create paired dataset
+            pair_segments = []
+            for i, cur_segment in enumerate(segments):
+                if len(segments) > i + 1:
+                    next_segment = segments[i+1]
+                new_segment = cur_segment
+	      
+                if (cur_segment["wav"] == next_segment["wav"] and len(segments) > i + 1) or self.get_sentence_count(cur_segment["en"]) == 2:
+                    if self.get_sentence_count(cur_segment["en"]) == 1 and self.get_sentence_count(next_segment["en"]) == 1:
+                        #Combine other lang text
+                        new_other = cur_segment[lang] + " " + next_segment[lang]
+                        new_segment[lang] = new_other
+		    
+                        #Combine en text
+                        new_en = cur_segment["en"] + " " + next_segment["en"]
+                        new_segment["en"] = new_en
+		    
+                        #Change duration
+                        new_duration = float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"])
+                        new_segment["duration"] = str(new_duration)
+		    
+                        pair_segments.append(new_segment)
+		    
+                    elif self.get_sentence_count(cur_segment["en"]) == 2:
+                        pair_segments.append(new_segment)
+        
+            segments = pair_segments
+
         # Gather info
         self.data = []
         for wav_filename, _seg_group in groupby(segments, lambda x: x["wav"]):
@@ -104,50 +136,80 @@ class MUSTC(Dataset):
         return len(self.data)
 
     #Edits the utterance by removing unecessary punctuations and adding special characters      
-    def edit_utterance(self, utterance):
-        #Removes punctuation
-        utterance = utterance.replace(" -- ", " ")
-        utterance = utterance.replace("--", "")
-        utterance = utterance.replace("[", "")
-        utterance = utterance.replace("]", "")
-        utterance = utterance.replace("\"", "")
-        utterance = utterance.replace(",", "")
-        #utterance = utterance.replace("'", "")
+    def edit_utterance(self, utterance, lang, pair):
+
+        # General punctuation cleanup
+        utterance = utterance.replace("(Video)", "").replace("(video)", "")
+        utterance = utterance.replace("(Audio)", "").replace("(audio)", "")
+        utterance = utterance.replace("[", "").replace("]", "")
+        utterance = utterance.replace("’", "'").replace("‘", "'")
+        utterance = utterance.replace("“", "").replace("”", "").replace("\"", "")
+        utterance = utterance.replace("（", "(").replace("）", ")")
+        utterance = utterance.replace("：", ":")
         utterance = utterance.replace(";", "")
-        utterance = utterance.replace("-", " ")
-        utterance = utterance.replace("(Video) ", "")
-        utterance = utterance.replace("(Audio) ", "")
-        utterance = utterance.replace(" / ", " ")  
-        utterance = utterance.replace("’", "'")
+        utterance = utterance.replace(" / ", " ")
+        utterance = utterance.replace("—", "-")
         utterance = re.sub("\u266A", " ", utterance)	# Remove music note
         utterance = re.sub("\u266B", " ", utterance)	# Remove music note
-        #Complicated edits to utterance
-        utterance = self.fix_and_remove_apostrophes(utterance)
-        utterance = self.remove_repeating_end(utterance)
-        #utterance = self.get_terminator_sentence(utterance)
+        
+        if lang in ["zh"]:
+            utterance = utterance.replace(" -- ", "，").replace("--", "，")
+            utterance = utterance.replace("'", "")
+        else:
+            utterance = utterance.replace(" -- ", " ").replace("--", "")
+            utterance = utterance.replace("-", " ")
+            utterance = utterance.replace(",", "")
+        
+        #Complicated edits after general punctuation cleanup
+        if lang not in ["zh"]:
+            utterance = self.fix_and_remove_apostrophes(utterance)
+        
         utterance = self.remove_speaker_initials(utterance)
         utterance = self.remove_speaker_two_name(utterance)
-        utterance = self.replace_pauses(utterance)
-
         utterance = utterance.replace(":", "")
+
+        utterance = self.replace_pauses(utterance, lang)
+        utterance = utterance.replace("(", "").replace(")", "")
+	
+        utterance = self.remove_repeating_end(utterance, lang)
+
         utterance = utterance.strip()                    # Clean up white space at start/end of sentence
         utterance = ' '.join(utterance.split())          # Clean up white space within sentence
+
+        utterance = self.check_no_end(utterance, lang)
+        if pair:
+            utterance = self.get_terminator_sentence(utterance)
+
         return utterance
 
-    #Replaces all values enclosed in () and starting with a capital letter to <0>
-    def replace_pauses(self, utterance):
-        #Provides number of ( in utterance
-        pause_count = utterance.count("(")
-        #Conditional satisfied if number of ( is greater than 0
-        if pause_count > 0:
-            #Loops for number of pause_count
-            for i in range(pause_count):
-                #Finds starting and ending index of pause
-                index_start = utterance.find("(")
-                index_end = utterance.find(")")
-                #Replaces pause with <0> if first letter is capitalized
-                if utterance[index_start+1].isupper():
-                    utterance = utterance[:index_start] + "<0>" + utterance[index_end+1:]
+    #Replaces specific noise captions with pause token <0>
+    def replace_pauses(self, utterance, lang):
+        index_start = utterance.find("(")
+        while index_start != -1:
+            index_end = utterance.find(")", index_start)
+            index_start_next = utterance.find("(", index_start+1)
+
+            if (index_end == -1) or ((index_end > index_start_next) and (index_start_next != -1)):
+                # Current "(" has no match, so just remove
+                utterance = utterance[:index_start] + utterance[index_start+1:]
+                index_start = utterance.find("(", index_start)
+            else:
+                segment = utterance[index_start:index_end+1]
+                if lang == "zh":
+                    # If (applause) or (laughter) or (clapping), replace
+                    if segment == "(掌声)" or segment == "(笑声)" or segment == "(鼓掌)":
+                        utterance = utterance[:index_start] + "<0>" + utterance[index_end+1:]
+                        index_start = utterance.find("(")
+                    else:
+                        index_start = utterance.find("(", index_start + 1)
+                else:
+                    #Replaces pause with <0> if first letter is capitalized
+                    if utterance[index_start+1].isupper():
+                        utterance = utterance[:index_start] + "<0>" + utterance[index_end+1:]
+                        index_start = utterance.find("(")
+                    else:
+                        index_start = utterance.find("(", index_start + 1)
+
         return utterance
         
     def fix_and_remove_apostrophes(self, utterance):
@@ -206,12 +268,15 @@ class MUSTC(Dataset):
 
     #Places a terminating character after sentences ending with .,!, and ?
     def get_terminator_sentence(self, utterance):
+        utterance = self.add_terminator(utterance, "。")
+        utterance = self.add_terminator(utterance, "？")
+        utterance = self.add_terminator(utterance, "！")
         utterance = self.add_terminator(utterance, ".")
         utterance = self.add_terminator(utterance, "?")
         utterance = self.add_terminator(utterance, "!")
         return utterance
 
-    #Removes the a speakers initials if it comes before a sentence
+    #Removes the speakers initials if it comes before a sentence
     def remove_speaker_initials(self, utterance):
         #Finds index of first :
         index = utterance.find(":")
@@ -219,7 +284,7 @@ class MUSTC(Dataset):
         if index != -1:
             #Loops until index
             for i in range(index):
-                #Continuesif character in utterance is capitalized
+                #Continues if character in utterance is capitalized
                 if utterance[i].isupper():
                     continue
                 #Returns original utterance if not a capital letter(Not initials)
@@ -241,45 +306,73 @@ class MUSTC(Dataset):
         return utterance
 
     #Removes repeating characters at the end of a sentence
-    def remove_repeating_end(self, utterance):
-        utterance = self.convert_multi_characters(utterance, ".")
-        utterance = self.convert_multi_characters(utterance, "!")
-        utterance = self.convert_multi_characters(utterance, "?")
+    def remove_repeating_end(self, utterance, lang):
+        utterance = self.convert_multi_characters(utterance, "。", lang)
+        utterance = self.convert_multi_characters(utterance, "？", lang)
+        utterance = self.convert_multi_characters(utterance, "！", lang)
+        utterance = self.convert_multi_characters(utterance, ".", lang)
+        utterance = self.convert_multi_characters(utterance, "!", lang)
+        utterance = self.convert_multi_characters(utterance, "?", lang)
         return utterance
 
     #Removes a repeating character from the end of sentences
-    def convert_multi_characters(self, utterance, end_character):
-        start_idx = end_idx = 0
+    def convert_multi_characters(self, utterance, end_character, lang):
+        start_idx = end_idx = utterance.find(end_character)
         #Loop executes while there are still repeating end characters
         while utterance.count(end_character + end_character) != 0:
-            #Finds the index of next end_character
-            start_idx = end_idx = utterance.find(end_character, end_idx)
             #Finds index of the character after end_character
             while end_idx < len(utterance) and utterance[end_idx] == end_character:
                 end_idx += 1
             # If not repeating character, no need to check anything so go to next loop
             if end_idx - start_idx == 1:
+                start_idx = end_idx = utterance.find(end_character, start_idx+1)
                 continue
 
             #Conditional satisfied if not at end of sentence
             if end_idx < len(utterance):
-                # Conditional satisfied if the following character is a number (e.g., 1.7 billion) or
-                # a space at the end (blank caused by prior processing) or
-                # the following character + 1 is a capital (e.g., "Good ... Let's do that.") or non-period special character
-                if utterance[end_idx].isdigit() or \
-                  (utterance[end_idx] == ' ' and end_idx + 1 == len(utterance)) or \
-                  (end_idx + 1 < len(utterance) and (utterance[end_idx + 1].isupper() or (not utterance[end_idx + 1].isalnum() and utterance[end_idx + 1] != "."))):
-                    utterance = utterance[0:start_idx] + end_character + utterance[end_idx:]
+                if lang in ["en", "de"]:
+                    # Conditional satisfied if the following character is a number (e.g., 1.7 billion) or
+                    # a space at the end (blank caused by prior processing) or
+                    # the following character + 1 is a capital (e.g., "Good ... Let's do that.") or non-period special character
+                    if utterance[end_idx].isdigit() or \
+                      (utterance[end_idx] == ' ' and end_idx + 1 == len(utterance)) or \
+                      (end_idx + 1 < len(utterance) and (utterance[end_idx + 1].isupper() or (not utterance[end_idx + 1].isalnum() and utterance[end_idx + 1] != "."))):
+                        utterance = utterance[0:start_idx] + end_character + utterance[end_idx:]
+                    else:
+                        utterance = utterance[0:start_idx] + utterance[end_idx:]
                 else:
                     utterance = utterance[0:start_idx] + utterance[end_idx:]
             #Conditional satisfied if at end of sentence
             elif end_idx == len(utterance):
                 utterance = utterance[0:start_idx] + end_character
+            
+	    #Finds the index of next end_character
+            start_idx = end_idx = utterance.find(end_character)
+
         return utterance
+
+    # Checks/adds terminating character if utterance does not already end with terminating character (i.e., sentence)
+    def check_no_end(self, utterance, lang):
+        if len(utterance) == 0:
+            return utterance
+        elif utterance == "<0>" or utterance == "<0> <0>" or utterance == "<0> <0> <0>":
+            return utterance
+
+        if lang == "zh":
+            if utterance.count("。") + utterance.count("？") + utterance.count("！") == 0:
+                utterance += "。"
+        else:
+            if utterance.count(".") + utterance.count("?") + utterance.count("!") == 0:
+                utterance += "."
+        return utterance
+
 
     #Returns the count of the number of sentences in an utterance
     def get_sentence_count(self, utterance):
         sentence_count = 0
+        sentence_count = self.increase_sentence_count(utterance, "。", sentence_count)
+        sentence_count = self.increase_sentence_count(utterance, "？", sentence_count)
+        sentence_count = self.increase_sentence_count(utterance, "！", sentence_count)
         sentence_count = self.increase_sentence_count(utterance, ".", sentence_count)
         sentence_count = self.increase_sentence_count(utterance, "?", sentence_count)
         sentence_count = self.increase_sentence_count(utterance, "!", sentence_count)
@@ -306,6 +399,8 @@ class MUSTC(Dataset):
 def process(args):
     root = Path(args.data_root).absolute()
     for lang in MUSTC.LANGUAGES:
+        if lang not in args.langs_to_process:
+            continue
         cur_root = root / f"en-{lang}"
         if not cur_root.is_dir():
             print(f"{cur_root.as_posix()} does not exist. Skipped.")
@@ -315,7 +410,7 @@ def process(args):
         feature_root.mkdir(exist_ok=True)
         for split in MUSTC.SPLITS:
             print(f"Fetching split {split}...", flush=True)
-            dataset = MUSTC(root.as_posix(), lang, split)
+            dataset = MUSTC(root.as_posix(), lang, split, args.pair)
             print("Extracting log mel filter bank features...", flush=True)
             if split == 'train' and args.cmvn_type == "global":
                 print("And estimating cepstral mean and variance stats...", flush=True)
@@ -351,7 +446,7 @@ def process(args):
         for split in MUSTC.SPLITS:
             is_train_split = split.startswith("train")
             manifest = {c: [] for c in MANIFEST_COLUMNS}
-            dataset = MUSTC(args.data_root, lang, split)
+            dataset = MUSTC(args.data_root, lang, split, args.pair)
             for wav, sr, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
                 manifest["id"].append(utt_id)
                 manifest["audio"].append(zip_manifest[utt_id])
@@ -395,7 +490,7 @@ def process(args):
 def process_joint(args):
     cur_root = Path(args.data_root)
     assert all((cur_root / f"en-{lang}").is_dir() for lang in MUSTC.LANGUAGES), \
-        "do not have downloaded data available for all 8 languages"
+        "do not have downloaded data available for all MUSTC languages"
     # Generate vocab
     vocab_size_str = "" if args.vocab_type == "char" else str(args.vocab_size)
     spm_filename_prefix = f"spm_{args.vocab_type}{vocab_size_str}_{args.task}"
@@ -453,7 +548,10 @@ def main():
                             "Maximum number of sentences to use to estimate"
                             "global mean and variance"
                             ))
+    parser.add_argument("--langs-to-process", nargs='+', default=[], help="List of MUSTC languages to process")
+    parser.add_argument("--pair", action="store_true", help="Create paired sentence dataset")
     args = parser.parse_args()
+    print(f"Args: {args}", flush=True)
 
     if args.joint:
         process_joint(args)
