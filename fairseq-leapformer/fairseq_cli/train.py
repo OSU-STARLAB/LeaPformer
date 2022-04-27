@@ -123,6 +123,10 @@ def main(cfg: FairseqConfig) -> None:
         )
     )
 
+    for key, value in model.named_parameters():
+        if not getattr(value, "expert", False):
+            logger.info("layer: {}, num params: {}".format(key, value.numel()))
+
     # Load valid dataset (we load training data below, based on the latest checkpoint)
     # We load the valid dataset AFTER building the model
     data_utils.raise_if_valid_subsets_unintentionally_ignored(cfg)
