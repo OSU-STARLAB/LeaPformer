@@ -8,6 +8,7 @@ from typing import Tuple, List
 import torch
 import torch.nn.functional as F
 from fairseq.models import FairseqEncoder
+from fairseq.data.data_utils import lengths_to_padding_mask
 from fairseq.models.speech_to_text import (
     ConvTransformerEncoder,
 )
@@ -70,7 +71,9 @@ class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
         x = self.out(x)
         x = self.embed_scale * x
 
-        subsampling_factor = 1.0 * max_seq_len / output_seq_len
+        #subsampling_factor = 1.0 * max_seq_len / output_seq_len
+        subsampling_factor = int(max_seq_len * 1.0 / output_seq_len + 0.5)
+
         input_lengths = torch.max(
             (src_lengths.float() / subsampling_factor).ceil().long(),
             x.size(0) * src_lengths.new_ones([src_lengths.size(0)]).long(),
@@ -84,6 +87,7 @@ class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
         positions = self.embed_positions(encoder_padding_mask).transpose(0, 1)
 
         x += positions
+
         x = F.dropout(x, p=self.dropout, training=self.training)
 
         # State to store memory banks etc.
@@ -142,6 +146,7 @@ class AugmentedMemoryTransformerEncoderLayer(TransformerEncoderLayer):
         # TODO reseach new sum_query method
         seg_start = self.left_context
         seg_end = length - self.right_context
+
         if seg_start < seg_end:
             summarization_query = torch.mean(x[seg_start:seg_end], keepdim=True, dim=0)
         else:
