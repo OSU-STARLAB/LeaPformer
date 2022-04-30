@@ -222,6 +222,16 @@ class TransformerConfig(FairseqDataclass):
         metadata={"help": "don't add an extra layernorm after the last decoder block"},
     )
 
+    share_encoder_ffn_attn_layer: List[int] = field(
+        default=None,
+        metadata={"help": "List of encoder layers that share feed-forward & attention weights --- acceptable values = 1 ... encoder_layers"},
+    )
+    share_decoder_ffn_attn_layer: List[int] = field(
+        default=None,	
+        metadata={"help": "List of decoder layers that share feed-forward & attention weights --- acceptable values = 1 ... decoder_layers"},
+    )
+
+
     # We need to make this hierarchical dataclass like the flat namespace
     # __getattr__ and __setattr__ here allow backward compatibility
     # for subclasses of Transformer(Legacy) that depend on read/write on

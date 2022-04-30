@@ -93,9 +93,20 @@ class TransformerEncoderBase(FairseqEncoder):
             self.layers = LayerDropModuleList(p=self.encoder_layerdrop)
         else:
             self.layers = nn.ModuleList([])
-        self.layers.extend(
-            [self.build_encoder_layer(cfg) for i in range(cfg.encoder.layers)]
-        )
+
+        # Layer sharing code
+        encoder_weight_share_list = getattr(cfg, "share_encoder_ffn_attn_layer")
+        if encoder_weight_share_list is None:
+            encoder_weight_share_list = []
+        else:
+            shared_weights_layer = self.build_encoder_layer(cfg)
+        print(f"Encoder: Sharing layers: {encoder_weight_share_list}")
+        for layer_idx in range(cfg.encoder.layers):
+            if layer_idx+1 in encoder_weight_share_list:
+                self.layers.append(shared_weights_layer)
+            else:
+                self.layers.append(self.build_encoder_layer(cfg))
+        
         self.num_layers = len(self.layers)
 
         if cfg.encoder.normalize_before:

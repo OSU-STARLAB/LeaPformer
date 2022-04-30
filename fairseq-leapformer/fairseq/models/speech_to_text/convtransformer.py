@@ -166,12 +166,7 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             help="the number of output channels of conv layer",
         )
 
-         # th-code
-        parser.add_argument(
-            "--share-ffn-attn",
-            action="store_true",
-            help="if True, share both feed-forward network and attention across layers",
-        )
+        # th-code
         parser.add_argument(
             "--share-encoder-ffn-attn-layer",
             nargs="+",
@@ -306,28 +301,19 @@ class ConvTransformerEncoder(FairseqEncoder):
 
         self.transformer_layers = nn.ModuleList([])
 
-        # th-code
-        if getattr(args, "share_ffn_attn", None):
-            print('Encoder: Start sharing both feed-forward network and attention.')
-            if getattr(args, "share_encoder_ffn_attn_layer", None):
-                lst_encoder_ffn_attn_layer = args.share_encoder_ffn_attn_layer
-            else:
-                lst_encoder_ffn_attn_layer = []
-
-            print('Encoder: Sharing the list of layers: ', lst_encoder_ffn_attn_layer)
-            share_encoder_ffn_attn_layer = TransformerEncoderLayer(args)
-            for i in range(args.encoder_layers):
-                if i+1 in lst_encoder_ffn_attn_layer:
-                    print('Encoder: Start sharing both feed-forward network and attention in this layer.')
-                    self.transformer_layers.append(share_encoder_ffn_attn_layer)
-                else:
-                    print('Encoder: Create a new layer.')
-                    self.transformer_layers.append(TransformerEncoderLayer(args))
+        # Layer sharing code
+        encoder_weight_share_list = getattr(args, "share_encoder_ffn_attn_layer", None)
+        if encoder_weight_share_list is None:
+            encoder_weight_share_list = []
         else:
-            self.transformer_layers.extend(
-                [TransformerEncoderLayer(args) for i in range(args.encoder_layers)]
-            )
-        # th-code
+            shared_weights_layer = TransformerEncoderLayer(args)
+        print(f"Encoder: Sharing layers: {encoder_weight_share_list}")
+        for layer_idx in range(args.encoder_layers):
+            if layer_idx+1 in encoder_weight_share_list:
+                self.transformer_layers.append(shared_weights_layer)
+            else:
+                self.transformer_layers.append(TransformerEncoderLayer(args))
+                    
 
         if args.encoder_normalize_before:
             self.layer_norm = LayerNorm(args.encoder_embed_dim)
