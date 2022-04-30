@@ -552,7 +552,8 @@ def main():
     parser.add_argument("--pair", action="store_true", help="Create paired sentence dataset")
     args = parser.parse_args()
     print(f"Args: {args}", flush=True)
-
+    assert len(args.langs_to_process) > 0, "You must specify target language(s) using --langs-to-process"
+    
     if args.joint:
         process_joint(args)
     else:
