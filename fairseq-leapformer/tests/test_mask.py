@@ -1,6 +1,7 @@
 
 import torch
 import argparse
+import math
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -28,29 +29,23 @@ if block_size is None:
 #print(block_size)
 dim = 6
 
-if (delay >= dim-1): # Full attention allowed, no need to check other conditions
+if (delay >= dim-1) or (block_size >= dim): # Full attention allowed, no need to check other conditions
     future_mask = torch.zeros([dim, dim])
 else:
     tri_mask = torch.triu(   # Start with mask that disallows looking into future
         torch.full((dim,dim), -999), 1
     )
-    # Create additional masks that consider self.encoder_mask_future_delay and self.encoder_block_size
-    block_count = dim // block_size
-    block_pad = dim % block_size
-    blocks = torch.full((block_count, block_size, block_size), 1, dtype=torch.bool)
-    block_mask = torch.nn.functional.pad(input=torch.block_diag(*blocks), pad=(0, block_pad, 0, block_pad))
 
+    # Create additional masks that consider self.encoder_mask_future_delay and self.encoder_block_size
+    block_count = math.ceil(dim / block_size)
+    blocks = torch.full((block_count, block_size, block_size), 1, dtype=torch.bool)
+    block_mask = torch.nn.functional.pad(input=torch.block_diag(*blocks), pad=(0, 0, 0, 0))[:dim,:dim]
     delay_mask = torch.cat(
         (
             torch.full((dim,delay+1), 1, dtype=torch.bool),
             torch.zeros((dim,dim-(delay+1)), dtype=torch.bool)
         ), 1
     )
-    
-    # VA, covers edge case where dim is less than block_size and the block_mask logic is a dimension off
-    if dim < block_size:
-        block_mask = block_mask[:-1]
-
     corr_mask = torch.logical_or(block_mask, delay_mask)
 
     print(f"Block mask:\n{block_mask}")

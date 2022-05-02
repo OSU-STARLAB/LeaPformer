@@ -335,33 +335,26 @@ class ConvTransformerEncoder(FairseqEncoder):
 
     def buffered_future_mask(self, tensor): # DP
         dim = tensor.size(0)
+        delay = self.encoder_mask_future_delay
+        block_size = self.encoder_mask_block_size
 
-        if (self.encoder_mask_future_delay >= dim-1): # Full attention allowed, no need to check other conditions
+        if (delay >= dim-1) or (block_size >= dim): # Full attention allowed, no need to check other conditions
             self._future_mask = torch.zeros([dim, dim])
         else: # Start with mask that disallows looking into future
             tri_mask = torch.triu(
                 utils.fill_with_neg_inf(torch.zeros([dim, dim])), 1
             )
 
-            delay = self.encoder_mask_future_delay
-            block_size = self.encoder_mask_block_size
-            block_count = dim // block_size
-            block_pad = dim % block_size
-            blocks = torch.full((block_count, block_size, block_size), 1, dtype=torch.bool)
-
             # Create additional masks that consider self.encoder_mask_future_delay and self.encoder_mask_block_size
-            block_mask = torch.nn.functional.pad(input=torch.block_diag(*blocks), pad=(0, block_pad, 0, block_pad))
+            block_count = math.ceil(dim / block_size)
+            blocks = torch.full((block_count, block_size, block_size), 1, dtype=torch.bool)
+            block_mask = torch.nn.functional.pad(input=torch.block_diag(*blocks), pad=(0, 0, 0, 0))[:dim,:dim]            
             delay_mask = torch.cat(
                 (
                     torch.full((dim,delay+1), 1, dtype=torch.bool),
                     torch.zeros( (dim,dim-(delay+1)), dtype=torch.bool)
                 ), 1
             )
-
-            # VA, covers edge case where dim is less than block_size and the block_mask logic is a dimension off
-            if dim < block_size:
-                block_mask = block_mask[:-1]
-            
             corr_mask = torch.logical_or(block_mask, delay_mask)
 
             self._future_mask = tri_mask.masked_fill_(corr_mask, 0) # Apply correction
