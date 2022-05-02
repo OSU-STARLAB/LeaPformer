@@ -47,6 +47,10 @@ else:
         ), 1
     )
     
+    # VA, covers edge case where dim is less than block_size and the block_mask logic is a dimension off
+    if dim < block_size:
+        block_mask = block_mask[:-1]
+
     corr_mask = torch.logical_or(block_mask, delay_mask)
 
     print(f"Block mask:\n{block_mask}")

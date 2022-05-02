@@ -357,6 +357,11 @@ class ConvTransformerEncoder(FairseqEncoder):
                     torch.zeros( (dim,dim-(delay+1)), dtype=torch.bool)
                 ), 1
             )
+
+            # VA, covers edge case where dim is less than block_size and the block_mask logic is a dimension off
+            if dim < block_size:
+                block_mask = block_mask[:-1]
+            
             corr_mask = torch.logical_or(block_mask, delay_mask)
 
             self._future_mask = tri_mask.masked_fill_(corr_mask, 0) # Apply correction
