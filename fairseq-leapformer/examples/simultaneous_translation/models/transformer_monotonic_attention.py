@@ -105,7 +105,7 @@ class TransformerMonotonicDecoder(TransformerDecoder):
             if layer_idx+1 in decoder_weight_share_list:
                 self.layers.append(shared_weights_layer)
             else:
-                self.layers.append(TransformerMonotonicDecoderLayer(args)
+                self.layers.append(TransformerMonotonicDecoderLayer(args))
 
         #self.layers.extend(
         #    [
