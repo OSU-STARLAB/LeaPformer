@@ -255,6 +255,7 @@ class TransformerMonotonicDecoder(TransformerDecoder):
                             # otherwise there will be duplicated saved_state
                             self.clean_cache(incremental_state, i + 1)
 
+                            x = self.post_attention(x)
                             return x, TransformerMonotonicDecoderOut(
                                 action=0,
                                 p_choose=p_choose,

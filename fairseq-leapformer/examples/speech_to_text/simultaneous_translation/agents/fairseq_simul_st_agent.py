@@ -224,6 +224,9 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         if args.waitk is not None:
             state["cfg"]["model"].waitk_lagging = args.waitk
+            self.waitk_lagging = args.waitk
+        else:
+            self.waitk_lagging = state["cfg"]["model"].waitk_lagging
         
         task = tasks.setup_task(task_args)
 
@@ -234,6 +237,8 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.model.load_state_dict(state["model"], strict=True)
         self.model.eval()
         self.model.share_memory()
+
+        print(self.model)
 
         if self.gpu:
             self.model.cuda()
@@ -305,7 +310,6 @@ class FairseqSimulSTAgent(SpeechAgent):
             torch.LongTensor([states.units.source.value.size(0)])
         )
 
-        #print(f"Running encoder with source: {src_indices}, {src_lengths}, {states.units.source.value.shape}", flush=True)
         states.encoder_states = self.model.encoder(src_indices, src_lengths)
         torch.cuda.empty_cache()
 
@@ -381,8 +385,9 @@ class FairseqSimulSTAgent(SpeechAgent):
 
     def flush(self, states):
         if self.continuous:
-            #print(f"Flushing after sentence...", flush=True)
-            states.units.source = TensorListEntry()     # To be improved, don't naively flush everything in source
+            print(f"Flushing after sentence...", flush=True)
+            states.units.source = TensorListEntry()     # Naively flush entirely source
+            #states.units.source = states.units.source[self.waitk_lagging:]  # Selectively flush first k elements of source (roughly amount that has been translated)
             states.units.target = ListEntry()
             states.incremental_states = dict()
             states.encoder_states = None
