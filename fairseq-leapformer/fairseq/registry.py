@@ -22,15 +22,6 @@ def setup_registry(registry_name: str, base_class=None, default=None, required=F
     REGISTRY_CLASS_NAMES = set()
     DATACLASS_REGISTRY = {}
 
-    # maintain a registry of all registries
-    if registry_name in REGISTRIES:
-        return  # registry already exists
-    REGISTRIES[registry_name] = {
-        "registry": REGISTRY,
-        "default": default,
-        "dataclass_registry": DATACLASS_REGISTRY,
-    }
-
     def build_x(cfg: Union[DictConfig, str, Namespace], *extra_args, **extra_kwargs):
         if isinstance(cfg, DictConfig):
             choice = cfg._name
@@ -96,5 +87,14 @@ def setup_registry(registry_name: str, base_class=None, default=None, required=F
             return cls
 
         return register_x_cls
+    
+    # maintain a registry of all registries
+    if registry_name in REGISTRIES:
+        return build_x, register_x, REGISTRIES[registry_name]["registry"], REGISTRIES[registry_name]["dataclass_registry"]  # registry already exists
+    REGISTRIES[registry_name] = {
+        "registry": REGISTRY,
+        "default": default,
+        "dataclass_registry": DATACLASS_REGISTRY,
+    }
 
     return build_x, register_x, REGISTRY, DATACLASS_REGISTRY
