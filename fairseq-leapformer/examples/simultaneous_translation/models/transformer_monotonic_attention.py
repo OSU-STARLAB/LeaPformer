@@ -93,12 +93,26 @@ class TransformerMonotonicDecoder(TransformerDecoder):
 
         self.dictionary = dictionary
         self.layers = nn.ModuleList([])
-        self.layers.extend(
-            [
-                TransformerMonotonicDecoderLayer(args)
-                for _ in range(args.decoder_layers)
-            ]
-        )
+
+        # Layer sharing code
+        decoder_weight_share_list = getattr(args, "share_decoder_ffn_attn_layer", None)
+        if decoder_weight_share_list is None:
+            decoder_weight_share_list = []
+        else:
+            shared_weights_layer = TransformerMonotonicDecoderLayer(args)
+        print(f"TransformerMonotonicDecoder sharing layers: {decoder_weight_share_list}")
+        for layer_idx in range(args.decoder_layers):
+            if layer_idx+1 in decoder_weight_share_list:
+                self.layers.append(shared_weights_layer)
+            else:
+                self.layers.append(TransformerMonotonicDecoderLayer(args))
+
+        #self.layers.extend(
+        #    [
+        #        TransformerMonotonicDecoderLayer(args)
+        #        for _ in range(args.decoder_layers)
+        #    ]
+        #)
         self.policy_criterion = getattr(args, "policy_criterion", "any")
         self.num_updates = None
 
