@@ -154,6 +154,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.max_len = args.max_len
 
         self.force_finish = args.force_finish
+        self.continuous = args.continuous
 
         torch.set_grad_enabled(False)
 
@@ -201,6 +202,8 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="Acoustic feature dimension.")
         parser.add_argument("--waitk", type=int, default=None,
                             help="Wait-k delay for evaluation")
+        parser.add_argument("--continuous", default=False, action="store_true",
+                            help="Simulate continuous input by flushing states after every eos prediction.")
 
         # fmt: on
         return parser
@@ -302,6 +305,7 @@ class FairseqSimulSTAgent(SpeechAgent):
             torch.LongTensor([states.units.source.value.size(0)])
         )
 
+        #print(f"Running encoder with source: {src_indices}, {src_lengths}, {states.units.source.value.shape}", flush=True)
         states.encoder_states = self.model.encoder(src_indices, src_lengths)
         torch.cuda.empty_cache()
 
@@ -311,7 +315,10 @@ class FairseqSimulSTAgent(SpeechAgent):
 
     def policy(self, states):
         if not getattr(states, "encoder_states", None):
-            return READ_ACTION
+            if states.finish_read():
+                return WRITE_ACTION
+            else:
+                return READ_ACTION
 
         tgt_indices = self.to_device(
             torch.LongTensor(
@@ -345,6 +352,9 @@ class FairseqSimulSTAgent(SpeechAgent):
             return WRITE_ACTION
 
     def predict(self, states):
+        if not getattr(states, "encoder_states", None):
+            return self.model.decoder.dictionary.eos()
+        
         decoder_states = states.decoder_out
 
         lprobs = self.model.get_normalized_probs(
@@ -354,6 +364,8 @@ class FairseqSimulSTAgent(SpeechAgent):
         index = lprobs.argmax(dim=-1)
 
         index = index[0, 0].item()
+
+        #print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
 
         if (
             self.force_finish
@@ -366,3 +378,12 @@ class FairseqSimulSTAgent(SpeechAgent):
             index = None
 
         return index
+
+    def flush(self, states):
+        if self.continuous:
+            #print(f"Flushing after sentence...", flush=True)
+            states.units.source = TensorListEntry()     # To be improved, don't naively flush everything in source
+            states.units.target = ListEntry()
+            states.incremental_states = dict()
+            states.encoder_states = None
+
