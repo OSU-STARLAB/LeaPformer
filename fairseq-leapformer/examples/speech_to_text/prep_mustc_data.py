@@ -249,7 +249,7 @@ class MUSTC(Dataset):
             index = utterance.find("'", index)
         return utterance
 
-    #Adds </s> after end_character designated
+    #Adds <e> after designated end_character
     def add_terminator(self, utterance, end_character):
         #Finds index of first end_character
         index = utterance.find(end_character)
@@ -258,11 +258,11 @@ class MUSTC(Dataset):
             index += 1
             #Conditional satisfied if end_character is last in utterance
             if index == len(utterance):
-                utterance = utterance + "</s>"
+                utterance = utterance + "<e>"
                 return utterance
-            #Conditional satisfied if first letter after end_character is capitalized, or is a digit, or is a special character not including a period.
-            elif index + 1 < len(utterance) and (utterance[index + 1].isupper() or utterance[index + 1].isdigit() or (not utterance[index + 1].isalnum() and utterance[index + 1] != ".")):
-                utterance = utterance[:index] + "</s>" + utterance[index:]
+            #Conditional satisfied if first char after end_character is not alphanumeric (indicating decimal, e.g., 1.7 billion or abbreviation, e.g., "U.S.") or second char after is lower (e.g., "in the U.S. there are ..." )
+            elif index + 1 < len(utterance) and not (utterance[index].isalnum() or utterance[index+1].islower()):
+                utterance = utterance[:index] + "<e>" + utterance[index:]
             index = utterance.find(end_character, index)
         return utterance
 
@@ -366,35 +366,10 @@ class MUSTC(Dataset):
                 utterance += "."
         return utterance
 
-
     #Returns the count of the number of sentences in an utterance
     def get_sentence_count(self, utterance):
-        sentence_count = 0
-        sentence_count = self.increase_sentence_count(utterance, "。", sentence_count)
-        sentence_count = self.increase_sentence_count(utterance, "？", sentence_count)
-        sentence_count = self.increase_sentence_count(utterance, "！", sentence_count)
-        sentence_count = self.increase_sentence_count(utterance, ".", sentence_count)
-        sentence_count = self.increase_sentence_count(utterance, "?", sentence_count)
-        sentence_count = self.increase_sentence_count(utterance, "!", sentence_count)
-        return sentence_count
+        return utterance.count("<e>")
 
-    #Returns the new sentence_count
-    def increase_sentence_count(self, utterance, end_character, sentence_count):
-        #Finds the index of the end_character
-        index = utterance.find(end_character)
-        #Repeats while more end_character remain
-        while index != -1:
-            index += 1
-            #Conditional satisfied if index equal to length of utterance
-            if index == len(utterance):
-                sentence_count += 1
-                return sentence_count
-            #Conditional satisfied index less than length of utterance and is capital, or a digit, or a special character that is not a period. 
-            elif index + 1 < len(utterance) and (utterance[index + 1].isupper() or utterance[index + 1].isdigit() or (not utterance[index + 1].isalnum() and utterance[index + 1] != ".")):
-                sentence_count += 1
-            #Finds the index of the next end_character
-            index = utterance.find(end_character, index)
-        return sentence_count
 
 def process(args):
     root = Path(args.data_root).absolute()
@@ -465,11 +440,13 @@ def process(args):
         with NamedTemporaryFile(mode="w") as f:
             for t in train_text:
                 f.write(t + "\n")
+            special_symbols = ['<0>', '<e>']
             gen_vocab(
                 Path(f.name),
                 cur_root / spm_filename_prefix,
                 args.vocab_type,
                 args.vocab_size,
+                special_symbols=special_symbols
             )
         # Generate config YAML
         gen_config_yaml(
@@ -500,9 +477,9 @@ def process_joint(args):
             df = load_df_from_tsv(tsv_path)
             for t in df["tgt_text"]:
                 f.write(t + "\n")
-        special_symbols = None
+        special_symbols = ['<0>', '<e>']
         if args.task == 'st':
-            special_symbols = [f'<lang:{lang}>' for lang in MUSTC.LANGUAGES]
+            special_symbols += [f'<lang:{lang}>' for lang in MUSTC.LANGUAGES]
         gen_vocab(
             Path(f.name),
             cur_root / spm_filename_prefix,
