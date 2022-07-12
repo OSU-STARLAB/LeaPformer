@@ -85,16 +85,13 @@ class MUSTC(Dataset):
                 if (cur_segment["wav"] == next_segment["wav"] and len(segments) > i + 1) or self.get_sentence_count(cur_segment["en"]) == 2:
                     if self.get_sentence_count(cur_segment["en"]) == 1 and self.get_sentence_count(next_segment["en"]) == 1:
                         #Combine other lang text
-                        new_other = cur_segment[lang] + " " + next_segment[lang]
-                        new_segment[lang] = new_other
+                        new_segment[lang] = cur_segment[lang] + " " + next_segment[lang]
 		    
                         #Combine en text
-                        new_en = cur_segment["en"] + " " + next_segment["en"]
-                        new_segment["en"] = new_en
+                        new_segment["en"] = cur_segment["en"] + " " + next_segment["en"]
 		    
                         #Change duration
-                        new_duration = float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"])
-                        new_segment["duration"] = str(new_duration)
+                        new_segment["duration"] = str( float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"]) )
 		    
                         pair_segments.append(new_segment)
 		    
@@ -138,6 +135,8 @@ class MUSTC(Dataset):
     #Edits the utterance by removing unecessary punctuations and adding special characters      
     def edit_utterance(self, utterance, lang, pair):
 
+        end_characters = {'en': ['.', '?', '!'], 'de': ['.', '?', '!'], 'zh': ['。', '？', '！']}
+
         # General punctuation cleanup
         utterance = utterance.replace("(Video)", "").replace("(video)", "")
         utterance = utterance.replace("(Audio)", "").replace("(audio)", "")
@@ -155,12 +154,18 @@ class MUSTC(Dataset):
         if lang in ["zh"]:
             utterance = utterance.replace(" -- ", "，").replace("--", "，")
             utterance = utterance.replace("'", "")
+            utterance = utterance.replace("；", "。")
+            if utterance[-1] == '，': 
+                utterance = utterance[:-1] + '。'
+            if utterance[0] == '，': 
+                utterance = utterance[1:]
         else:
             utterance = utterance.replace(" -- ", " ").replace("--", "")
             utterance = utterance.replace("-", " ")
             utterance = utterance.replace(",", "")
         
         #Complicated edits after general punctuation cleanup
+        utterance = fix_end_characters(utterance, end_characters, lang)
         if lang not in ["zh"]:
             utterance = self.fix_and_remove_apostrophes(utterance)
         
@@ -171,16 +176,40 @@ class MUSTC(Dataset):
         utterance = self.replace_pauses(utterance, lang)
         utterance = utterance.replace("(", "").replace(")", "")
 	
-        utterance = self.remove_repeating_end(utterance, lang)
+        utterance = self.remove_repeating_end(utterance, end_characters[lang], lang)
 
         utterance = utterance.strip()                    # Clean up white space at start/end of sentence
         utterance = ' '.join(utterance.split())          # Clean up white space within sentence
 
         utterance = self.check_no_end(utterance, lang)
         if pair:
-            utterance = self.get_terminator_sentence(utterance)
+            utterance = self.add_terminator(utterance, end_characters[lang])
 
         return utterance
+
+    # Make sure all end characters are correct for the language (remove 'en' characters from other languages)
+    def fix_end_characters(self, utterance, end_characters, lang):
+        #print(f"Checking utterance: {utterance}", flush=True)
+        for end_char_idx in list(range(len(end_characters['en']))):
+            check_char = end_characters['en'][end_char_idx]
+            index = utterance.find(end_characters['en'][end_char_idx])
+            while index != -1:
+                #print(f"index: {index}, len(utterance): {len(utterance)}", flush=True)
+                #print(f"Char at index: {utterance[index]}", flush=True)
+                #if index+1 < len(utterance):
+                #    print(f"Char at index+1: {utterance[index+1]}", flush=True)
+
+                # If end of sentence, always replace
+                if index+1 == len(utterance):
+                #    print("Condition 1 met")
+                    utterance = utterance[:index] + end_characters[lang][end_char_idx]
+                # Substitute en character unless followed by english character or number
+                elif not (utterance[index+1].isascii() and utterance[index+1].isalnum()):
+                #    print("Condition 2 met")
+                    utterance = utterance[:index] + end_characters[lang][end_char_idx] + utterance[index+1:]
+                index = utterance.find(end_characters['en'][end_char_idx], index+1)
+        return utterance
+
 
     #Replaces specific noise captions with pause token <0>
     def replace_pauses(self, utterance, lang):
@@ -197,7 +226,7 @@ class MUSTC(Dataset):
                 segment = utterance[index_start:index_end+1]
                 if lang == "zh":
                     # If (applause) or (laughter) or (clapping), replace
-                    if segment == "(掌声)" or segment == "(笑声)" or segment == "(鼓掌)":
+                    if segment == "(掌声)" or segment == "(笑声)" or segment == "(鼓掌)" or segment == "(笑)":
                         utterance = utterance[:index_start] + "<0>" + utterance[index_end+1:]
                         index_start = utterance.find("(")
                     else:
@@ -249,33 +278,6 @@ class MUSTC(Dataset):
             index = utterance.find("'", index)
         return utterance
 
-    #Adds <e> after designated end_character
-    def add_terminator(self, utterance, end_character):
-        #Finds index of first end_character
-        index = utterance.find(end_character)
-        #Repeats while end_character remaining
-        while index != -1:
-            index += 1
-            #Conditional satisfied if end_character is last in utterance
-            if index == len(utterance):
-                utterance = utterance + "<e>"
-                return utterance
-            #Conditional satisfied if first char after end_character is not alphanumeric (indicating decimal, e.g., 1.7 billion or abbreviation, e.g., "U.S.") or second char after is lower (e.g., "in the U.S. there are ..." )
-            elif index + 1 < len(utterance) and not (utterance[index].isalnum() or utterance[index+1].islower()):
-                utterance = utterance[:index] + "<e>" + utterance[index:]
-            index = utterance.find(end_character, index)
-        return utterance
-
-    #Places a terminating character after sentences ending with .,!, and ?
-    def get_terminator_sentence(self, utterance):
-        utterance = self.add_terminator(utterance, "。")
-        utterance = self.add_terminator(utterance, "？")
-        utterance = self.add_terminator(utterance, "！")
-        utterance = self.add_terminator(utterance, ".")
-        utterance = self.add_terminator(utterance, "?")
-        utterance = self.add_terminator(utterance, "!")
-        return utterance
-
     #Removes the speakers initials if it comes before a sentence
     def remove_speaker_initials(self, utterance):
         #Finds index of first :
@@ -305,50 +307,41 @@ class MUSTC(Dataset):
                 return utterance[index_colon+2:]
         return utterance
 
-    #Removes repeating characters at the end of a sentence
-    def remove_repeating_end(self, utterance, lang):
-        utterance = self.convert_multi_characters(utterance, "。", lang)
-        utterance = self.convert_multi_characters(utterance, "？", lang)
-        utterance = self.convert_multi_characters(utterance, "！", lang)
-        utterance = self.convert_multi_characters(utterance, ".", lang)
-        utterance = self.convert_multi_characters(utterance, "!", lang)
-        utterance = self.convert_multi_characters(utterance, "?", lang)
-        return utterance
-
     #Removes a repeating character from the end of sentences
-    def convert_multi_characters(self, utterance, end_character, lang):
-        start_idx = end_idx = utterance.find(end_character)
-        #Loop executes while there are still repeating end characters
-        while utterance.count(end_character + end_character) != 0:
-            #Finds index of the character after end_character
-            while end_idx < len(utterance) and utterance[end_idx] == end_character:
-                end_idx += 1
-            # If not repeating character, no need to check anything so go to next loop
-            if end_idx - start_idx == 1:
-                start_idx = end_idx = utterance.find(end_character, start_idx+1)
-                continue
+    def remove_repeating_end(self, utterance, end_characters, lang):
+        for end_character in end_characters:
+            start_idx = end_idx = utterance.find(end_character)
+            #Loop executes while there are still repeating end characters
+            while utterance.count(end_character + end_character) != 0:
+                #Finds index of the character after end_character
+                while end_idx < len(utterance) and utterance[end_idx] == end_character:
+                    end_idx += 1
+                # If not repeating character, no need to check anything so go to next loop
+                if end_idx - start_idx == 1:
+                    start_idx = end_idx = utterance.find(end_character, start_idx+1)
+                    continue
 
-            #Conditional satisfied if not at end of sentence
-            if end_idx < len(utterance):
-                if lang in ["en", "de"]:
-                    # Conditional satisfied if the following character is a number (e.g., 1.7 billion) or
-                    # a space at the end (blank caused by prior processing) or
-                    # the following character + 1 is a capital (e.g., "Good ... Let's do that.") or non-period special character
-                    if utterance[end_idx].isdigit() or \
-                      (utterance[end_idx] == ' ' and end_idx + 1 == len(utterance)) or \
-                      (end_idx + 1 < len(utterance) and (utterance[end_idx + 1].isupper() or (not utterance[end_idx + 1].isalnum() and utterance[end_idx + 1] != "."))):
-                        utterance = utterance[0:start_idx] + end_character + utterance[end_idx:]
+                #Conditional satisfied if not at end of sentence
+                if end_idx < len(utterance):
+                    if lang in ["en", "de"]:
+                        # Conditional satisfied if the following character is a number (e.g., 1.7 billion) or
+                        # a space at the end (blank caused by prior processing) or
+                        # the following character + 1 is a capital (e.g., "Good ... Let's do that.") or non-period special character
+                        if utterance[end_idx].isdigit() or \
+                          (utterance[end_idx] == ' ' and end_idx + 1 == len(utterance)) or \
+                          (end_idx + 1 < len(utterance) and (utterance[end_idx + 1].isupper() or (not utterance[end_idx + 1].isalnum() and utterance[end_idx + 1] != "."))):
+                            utterance = utterance[0:start_idx] + end_character + utterance[end_idx:]
+                        else:
+                            utterance = utterance[0:start_idx] + utterance[end_idx:]
                     else:
                         utterance = utterance[0:start_idx] + utterance[end_idx:]
-                else:
-                    utterance = utterance[0:start_idx] + utterance[end_idx:]
-            #Conditional satisfied if at end of sentence
-            elif end_idx == len(utterance):
-                utterance = utterance[0:start_idx] + end_character
+                #Conditional satisfied if at end of sentence
+                elif end_idx == len(utterance):
+                    utterance = utterance[0:start_idx] + end_character
             
-	    #Finds the index of next end_character
-            start_idx = end_idx = utterance.find(end_character)
-
+                #Finds the index of next end_character
+                start_idx = end_idx = utterance.find(end_character)
+        
         return utterance
 
     # Checks/adds terminating character if utterance does not already end with terminating character (i.e., sentence)
@@ -358,12 +351,31 @@ class MUSTC(Dataset):
         elif utterance == "<0>" or utterance == "<0> <0>" or utterance == "<0> <0> <0>":
             return utterance
 
-        if lang == "zh":
-            if utterance.count("。") + utterance.count("？") + utterance.count("！") == 0:
+        if utterance[-1].isalnum():
+            if lang == "zh":
                 utterance += "。"
-        else:
-            if utterance.count(".") + utterance.count("?") + utterance.count("!") == 0:
+            else:
                 utterance += "."
+
+        return utterance
+    
+    #Adds <e> after designated end_character
+    def add_terminator(self, utterance, end_characters):
+        for end_character in end_characters:
+            #Finds index of first end_character
+            index = utterance.find(end_character)
+            #Repeats while end_character remaining
+            while index != -1:
+                index += 1
+                #Conditional satisfied if end_character is last in utterance
+                if index == len(utterance):
+                    utterance = utterance + "<e>"
+                    return utterance
+                #Conditional satisfied if first char after end_character is not alphanumeric (indicating decimal, e.g., 1.7 billion or abbreviation, e.g., "U.S.") or second char after is lower (e.g., "in the U.S. there are ..." )
+                elif index + 1 < len(utterance) and not (utterance[index].isalnum() or utterance[index+1].islower()):
+                    utterance = utterance[:index] + "<e>" + utterance[index:]
+                index = utterance.find(end_character, index)
+
         return utterance
 
     #Returns the count of the number of sentences in an utterance
