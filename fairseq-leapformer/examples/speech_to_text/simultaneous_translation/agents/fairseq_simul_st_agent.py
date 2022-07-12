@@ -152,9 +152,15 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.feature_extractor = OnlineFeatureExtractor(args)
 
         self.max_len = args.max_len
+        self.max_len_after_finish_read = args.max_len_after_finish_read
+        print(f"Max len overall: {self.max_len}, max len after finish reading: {self.max_len_after_finish_read}", flush=True)
 
         self.force_finish = args.force_finish
+        
         self.continuous = args.continuous
+        self.flush_method = args.flush_method
+        if self.continuous:
+            print(f"Enabled continuous mode with flush method: {self.flush_method}", flush=True)
 
         torch.set_grad_enabled(False)
 
@@ -190,6 +196,8 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="User directory for simultaneous translation")
         parser.add_argument("--max-len", type=int, default=200,
                             help="Max length of translation")
+        parser.add_argument("--max-len-after-finish-read", type=int, default=25,
+                            help="Max length of translation after flush, if using continuous mode")
         parser.add_argument("--force-finish", default=False, action="store_true",
                             help="Force the model to finish the hypothsis if the source is not finished")
         parser.add_argument("--shift-size", type=int, default=SHIFT_SIZE,
@@ -204,6 +212,8 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="Wait-k delay for evaluation")
         parser.add_argument("--continuous", default=False, action="store_true",
                             help="Simulate continuous input by flushing states after every eos prediction.")
+        parser.add_argument("--flush-method", type=str, default="naive",
+                            help="Method to use when determining flush in continuous mode (see --continuous).")
 
         # fmt: on
         return parser
@@ -252,6 +262,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         states.units.source = TensorListEntry()
         states.units.target = ListEntry()
         states.incremental_states = dict()
+        self.past_finish_read = 0
 
     def segment_to_units(self, segment, states):
         # Convert speech samples to features
@@ -265,6 +276,15 @@ class FairseqSimulSTAgent(SpeechAgent):
         # Merge sub word to full word.
         if self.model.decoder.dictionary.eos() == units[0]:
             return DEFAULT_EOS
+        
+        if (
+            len(units) > 0
+            and self.model.decoder.dictionary.eos() == units[-1]
+            or len(states.units.target) > self.max_len
+            or self.past_finish_read > self.max_len_after_finish_read
+        ):
+            tokens = [self.model.decoder.dictionary.string([unit]) for unit in units]
+            return ["".join(tokens).replace(BOW_PREFIX, "")] + [DEFAULT_EOS]
 
         segment = []
         if None in units.value:
@@ -290,14 +310,6 @@ class FairseqSimulSTAgent(SpeechAgent):
             else:
                 segment += [token.replace(BOW_PREFIX, "")]
 
-        if (
-            len(units) > 0
-            and self.model.decoder.dictionary.eos() == units[-1]
-            or len(states.units.target) > self.max_len
-        ):
-            tokens = [self.model.decoder.dictionary.string([unit]) for unit in units]
-            return ["".join(tokens).replace(BOW_PREFIX, "")] + [DEFAULT_EOS]
-
         return None
 
     def update_model_encoder(self, states):
@@ -318,6 +330,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.update_model_encoder(states)
 
     def policy(self, states):
+        print(f"States.units.source len: {len(states.units.source)}", flush=True)
         if not getattr(states, "encoder_states", None):
             if states.finish_read():
                 return WRITE_ACTION
@@ -350,9 +363,12 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         torch.cuda.empty_cache()
 
-        if outputs.action == 0:
+        if (outputs.action == 0) and (not states.finish_read()):
             return READ_ACTION
         else:
+            if states.finish_read():
+                self.past_finish_read += 1
+                print(f"Past finish: {self.past_finish_read}", flush=True)
             return WRITE_ACTION
 
     def predict(self, states):
@@ -369,7 +385,7 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         index = index[0, 0].item()
 
-        #print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
+        print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
 
         if (
             self.force_finish
@@ -385,10 +401,36 @@ class FairseqSimulSTAgent(SpeechAgent):
 
     def flush(self, states):
         if self.continuous:
-            print(f"Flushing after sentence...", flush=True)
-            states.units.source = TensorListEntry()     # Naively flush entirely source
-            #states.units.source = states.units.source[self.waitk_lagging:]  # Selectively flush first k elements of source (roughly amount that has been translated)
+            flush_method = self.flush_method
+            
+            #print(f"Source len before flush: {len(states.units.source)}", flush=True)
+            if states.finish_read():
+                # Force finish translation since, assuming we are keeping up with translation, there is no additional sentence to translate
+                states.units.source = TensorListEntry()
+                states.encoder_states = None
+            else:
+                # For all methods, take into account pre_decision_ratio & downsampling factor from conv)
+                if flush_method == 'naive':
+                    # Naively flush entire source (except one segment for correctness)
+                    flush_amount = 1 * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio
+                    states.units.source.value = states.units.source.value[-flush_amount:]
+                    self.update_states_read(states)
+                elif flush_method == 'keep_last_k':    
+                    # Flush up to last k elements of source
+                    # Roughly the amount that needs to be translated if we still have additional audio to process
+                    flush_amount = self.waitk_lagging * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio
+                    states.units.source.value = states.units.source.value[-flush_amount:]
+                    self.update_states_read(states)
+                elif flush_method == 'decoder_sync':    
+                    # Flush number of elements from source that have been translated by decoder
+                    flush_amount = int( 0.75 * len(states.units.target)) * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio
+                    print(f"Flush amount: {flush_amount}", flush=True)
+                    states.units.source.value = states.units.source.value[flush_amount:]
+                    if len(states.units.source) > 0:
+                        self.update_states_read(states)
+                    else:
+                        states.encoder_states = None
+            
             states.units.target = ListEntry()
             states.incremental_states = dict()
-            states.encoder_states = None
 
