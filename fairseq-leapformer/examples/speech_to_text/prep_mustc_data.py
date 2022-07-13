@@ -51,7 +51,7 @@ class MUSTC(Dataset):
     SPLITS = ["train", "dev", "tst-COMMON", "tst-HE"]
     LANGUAGES = ["de", "es", "fr", "it", "nl", "pt", "ro", "ru", "zh"]
 
-    def __init__(self, root: str, lang: str, split: str, pair: bool) -> None:
+    def __init__(self, root: str, lang: str, split: str, pair_type: str) -> None:
         assert split in self.SPLITS and lang in self.LANGUAGES
         _root = Path(root) / f"en-{lang}" / "data" / split
         wav_root, txt_root = _root / "wav", _root / "txt"
@@ -63,42 +63,62 @@ class MUSTC(Dataset):
             print("Please install PyYAML to load the MuST-C YAML files")
         with open(txt_root / f"{split}.yaml") as f:
             segments = yaml.load(f, Loader=yaml.BaseLoader)
+        num_segments = len(segments)
         # Load source and target utterances
         for _lang in ["en", lang]:
             with open(txt_root / f"{split}.{_lang}") as f:
                 utterances = [r.strip() for r in f]
-            assert len(segments) == len(utterances)
+            assert num_segments == len(utterances)
             for i, u in enumerate(utterances):
-                #print(f"O: {u}")
-                u = self.edit_utterance(u, _lang, pair)
-                #print(f"E: {u}", flush=True)
+                u = self.edit_utterance(u, _lang, pair_type)
                 segments[i][_lang] = u
 
-        if pair:
-            # Create paired dataset
+        if pair_type != None:
+            print(f"Creating paired dataset with method: {pair_type}", flush=True)
             pair_segments = []
             for i, cur_segment in enumerate(segments):
-                if len(segments) > i + 1:
+                if i+1 < num_segments:
                     next_segment = segments[i+1]
-                new_segment = cur_segment
-	      
-                if (cur_segment["wav"] == next_segment["wav"] and len(segments) > i + 1) or self.get_sentence_count(cur_segment["en"]) == 2:
-                    if self.get_sentence_count(cur_segment["en"]) == 1 and self.get_sentence_count(next_segment["en"]) == 1:
-                        #Combine other lang text
-                        new_segment[lang] = cur_segment[lang] + " " + next_segment[lang]
-		    
-                        #Combine en text
-                        new_segment["en"] = cur_segment["en"] + " " + next_segment["en"]
-		    
-                        #Change duration
-                        new_segment["duration"] = str( float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"]) )
-		    
-                        pair_segments.append(new_segment)
-		    
+                else:
+                    next_segment = None
+                pair_segment = {k: v for k,v in cur_segment.items()}    # Deepcopy in case we want to keep original segments unchanged
+                pair_segment["speaker_id"] += "_pair"
+
+                if (pair_type == "partial") or (pair_type == "original+partial") :
+                    # 'Partial' method uses 1.5 seconds of audio from the next segment, but none of the text
+                    # This method aims to make model aware of potential for subsequent sentences
+                    # Placing the end of context token <e> therefore requires learning to ignore audio after the current sentence
+                    
+                    # Only combine segments with 1 sentence each, since we don't have knowledge of where to cut audio
+                    if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment["en"]) == 1) and (self.get_sentence_count(next_segment["en"]) == 1):
+                        pair_segment["en"] = cur_segment["en"]
+                        pair_segment[lang] = cur_segment[lang]
+                        
+                        base_duration = float(next_segment["offset"]) - float(cur_segment["offset"])        # Time before first word of next segment
+                        pair_duration = base_duration + min(1.5, float(next_segment["duration"]))           # Add either 1.5 seconds or duration of next segment
+                        pair_segment["duration"] = str( pair_duration ) 
+
+                        pair_segments.append(pair_segment)
+
+                elif (pair_type == "full") or (pair_type == "original+full"):
+                    # 'Full' method uses all audio & text from the next sentence/segment
+                    # This method aims to make model aware of potential contextual information
+                    # But makes assumption that there will "always" be a 2nd sentence, so could introduce odd behavior if evaluating on single-sentence dataset
+                    
+                    if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment["en"]) == 1) and (self.get_sentence_count(next_segment["en"]) == 1):
+                        pair_segment["en"] = cur_segment["en"] + next_segment["en"]
+                        pair_segment[lang] = cur_segment[lang] + " " + next_segment[lang]
+                        pair_segment["duration"] = str( float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"]) )
+
+                        pair_segments.append(pair_segment)
+
                     elif self.get_sentence_count(cur_segment["en"]) == 2:
-                        pair_segments.append(new_segment)
-        
-            segments = pair_segments
+                        pair_segments.append(pair_segment)
+
+            if "original" in pair_type:
+                segments = segments + pair_segments
+            else:
+                segments = pair_segments
 
         # Gather info
         self.data = []
@@ -109,7 +129,7 @@ class MUSTC(Dataset):
             for i, segment in enumerate(seg_group):
                 offset = int(float(segment["offset"]) * sample_rate)
                 n_frames = int(float(segment["duration"]) * sample_rate)
-                _id = f"{wav_path.stem}_{i}"
+                _id = f"{wav_path.stem}_{i}_pair" if ("pair" in segment["speaker_id"]) else f"{wav_path.stem}_{i}"
                 self.data.append(
                     (
                         wav_path.as_posix(),
@@ -133,7 +153,7 @@ class MUSTC(Dataset):
         return len(self.data)
 
     #Edits the utterance by removing unecessary punctuations and adding special characters      
-    def edit_utterance(self, utterance, lang, pair):
+    def edit_utterance(self, utterance, lang, pair_type):
 
         end_characters = {'en': ['.', '?', '!'], 'de': ['.', '?', '!'], 'zh': ['。', '？', '！']}
 
@@ -165,7 +185,7 @@ class MUSTC(Dataset):
             utterance = utterance.replace(",", "")
         
         #Complicated edits after general punctuation cleanup
-        utterance = fix_end_characters(utterance, end_characters, lang)
+        utterance = self.fix_end_characters(utterance, end_characters, lang)
         if lang not in ["zh"]:
             utterance = self.fix_and_remove_apostrophes(utterance)
         
@@ -182,7 +202,7 @@ class MUSTC(Dataset):
         utterance = ' '.join(utterance.split())          # Clean up white space within sentence
 
         utterance = self.check_no_end(utterance, lang)
-        if pair:
+        if pair_type != None:
             utterance = self.add_terminator(utterance, end_characters[lang])
 
         return utterance
@@ -397,7 +417,7 @@ def process(args):
         feature_root.mkdir(exist_ok=True)
         for split in MUSTC.SPLITS:
             print(f"Fetching split {split}...", flush=True)
-            dataset = MUSTC(root.as_posix(), lang, split, args.pair)
+            dataset = MUSTC(root.as_posix(), lang, split, args.pair_type)
             print("Extracting log mel filter bank features...", flush=True)
             if split == 'train' and args.cmvn_type == "global":
                 print("And estimating cepstral mean and variance stats...", flush=True)
@@ -433,7 +453,7 @@ def process(args):
         for split in MUSTC.SPLITS:
             is_train_split = split.startswith("train")
             manifest = {c: [] for c in MANIFEST_COLUMNS}
-            dataset = MUSTC(args.data_root, lang, split, args.pair)
+            dataset = MUSTC(args.data_root, lang, split, args.pair_type)
             for wav, sr, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
                 manifest["id"].append(utt_id)
                 manifest["audio"].append(zip_manifest[utt_id])
@@ -538,7 +558,7 @@ def main():
                             "global mean and variance"
                             ))
     parser.add_argument("--langs-to-process", nargs='+', default=[], help="List of MUSTC languages to process")
-    parser.add_argument("--pair", action="store_true", help="Create paired sentence dataset")
+    parser.add_argument("--pair-type", default=None, type=str, help="Method to create paired sentence dataset, if desired")
     args = parser.parse_args()
     print(f"Args: {args}", flush=True)
     assert len(args.langs_to_process) > 0, "You must specify target language(s) using --langs-to-process"
