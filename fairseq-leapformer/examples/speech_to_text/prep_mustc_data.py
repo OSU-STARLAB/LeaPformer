@@ -166,22 +166,31 @@ class MUSTC(Dataset):
         utterance = utterance.replace("—", "–")                     # Convert all em dash to en dash
         utterance = utterance.replace(" / ", " ")
         utterance = utterance.replace("©", "").replace("®", "").replace("♪", "").replace("♫", "")
+
+        if len(utterance) == 0:
+            return utterance
         
         if lang in ["zh"]:
             utterance = utterance.replace(" -- ", "--").replace("--", "，")                     # Convert all hyphen used for pause to commas
             utterance = utterance.replace("~", "–").replace("––", "–")        # Convert all tilde & en dashes to single en dash
             utterance = utterance.replace(", ", "，").replace(",", "，").replace(";", "。").replace("…", "。") 
+            
+            utterance = ' '.join(utterance.strip().split())
             if (utterance[-1] == '，') or (utterance[-1] == "–"):   # Replace end if comma or dash
-                utterance = utterance[:-1] + '。'
+                utterance = ' '.join(utterance[:-1].strip().split()) + '。'
             if (utterance[0] == '，')  or (utterance[0] == "–"):
                 utterance = utterance[1:]                           # Remove start if comma or dash
+            utterance = ' '.join(utterance.strip().split())
         else:
             utterance = utterance.replace("—", ", ").replace("–", ", ").replace(" -- ", ", ").replace("--", ", ")    # Convert all dash & double hyphen to comma
-            utterance = utterance.replace(";", ". ")
+            utterance = utterance.replace(";", ", ")
+            
+            utterance = ' '.join(utterance.strip().split())
             if (utterance[-1] == ',') or (utterance[-1] == "-"):   # Replace end if comma or dash
-                utterance = utterance[:-1] + '.'
+                utterance = ' '.join(utterance[:-1].strip().split()) + '.'
             if (utterance[0] == ',')  or (utterance[0] == "-"):
                 utterance = utterance[1:]                           # Remove start if comma or dash
+            utterance = ' '.join(utterance.strip().split())
         
         #Complicated edits after general punctuation cleanup
         if lang not in ["zh"]:
@@ -199,8 +208,7 @@ class MUSTC(Dataset):
         utterance = self.fix_end_characters(utterance, end_characters, lang)
         utterance = self.remove_repeating_end(utterance, end_characters[lang], lang)
 
-        utterance = utterance.strip()                    # Clean up white space at start/end of sentence
-        utterance = ' '.join(utterance.split())          # Clean up white space within sentence
+        utterance = ' '.join(utterance.strip().split())     # Clean up white space
         utterance = self.check_no_end(utterance, lang)
         if pair_type != None:
             utterance = self.add_terminator(utterance, end_characters[lang])
@@ -390,7 +398,7 @@ class MUSTC(Dataset):
                 #Conditional satisfied if end_character is last in utterance
                 if index == len(utterance):
                     utterance = utterance + "<e>"
-                    return utterance
+                    continue
                 #Conditional satisfied if first char after end_character is not alphanumeric (indicating decimal, e.g., 1.7 billion or abbreviation, e.g., "U.S.") or second char after is lower (e.g., "in the U.S. there are ..." )
                 elif index + 1 < len(utterance) and not (utterance[index].isalnum() or utterance[index+1].islower()):
                     utterance = utterance[:index] + "<e>" + utterance[index:]
