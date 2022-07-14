@@ -284,6 +284,8 @@ class FairseqSimulSTAgent(SpeechAgent):
             or self.past_finish_read > self.max_len_after_finish_read
         ):
             tokens = [self.model.decoder.dictionary.string([unit]) for unit in units]
+            for j in range(len(units)):
+                units.pop()
             return ["".join(tokens).replace(BOW_PREFIX, "")] + [DEFAULT_EOS]
 
         segment = []
