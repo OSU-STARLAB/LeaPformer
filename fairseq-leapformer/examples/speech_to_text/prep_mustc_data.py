@@ -159,37 +159,39 @@ class MUSTC(Dataset):
 
         # General punctuation cleanup
         utterance = utterance.replace("(Video)", "").replace("(video)", "").replace("(Audio)", "").replace("(audio)", "")
-        utterance = utterance.replace("[", "").replace("]", "").replace("「", "").replace("」", "")
-        utterance = utterance.replace("“", "").replace("”", "").replace("\"", "").replace("＂", "").replace("《", ""). replace("》", "")
-        utterance = utterance.replace("（", "(").replace("）", ")").replace("：", ":").replace("；", ";")
+        utterance = utterance.replace("[", "").replace("]", "").replace("「", "").replace("」", "").replace("｢", "").replace("｣", "")
+        utterance = utterance.replace("“", "").replace("”", "").replace("\"", "").replace("＂", "").replace("《", ""). replace("》", "").replace("【", "").replace("】", "").replace("‟", "").replace("„", "")
+        utterance = utterance.replace("（", "(").replace("）", ")").replace("：", ":").replace("；", ";").replace("～", "~").replace("％", "%").replace("．", ".").replace("⋯", ".")
         utterance = utterance.replace("’", "'").replace("‘", "'")
-        utterance = utterance.replace("—", "–")                     # Convert all em dash to en dash
+        utterance = utterance.replace("—", "–").replace("─", "–")                     # Convert all dash types (0x2014, 0x2500) to regular en dash
+        utterance = utterance.replace("－", "-")                                      # Convert all hyphen types (0xFF0D) to regular hyphen
+        utterance = utterance.replace("﹖", "?")
         utterance = utterance.replace(" / ", " ")
-        utterance = utterance.replace("©", "").replace("®", "").replace("♪", "").replace("♫", "")
+        utterance = utterance.replace("©", "").replace("®", "").replace("™", "").replace("♪", "").replace("♫", "")
 
         if len(utterance) == 0:
             return utterance
-        
+
         if lang in ["zh"]:
-            utterance = utterance.replace(" -- ", "--").replace("--", "，")                     # Convert all hyphen used for pause to commas
+            utterance = utterance.replace(" -- ", "--").replace(" --", "--").replace("-- ", "--").replace("--", "，")                     # Convert all hyphen used for pause to commas
             utterance = utterance.replace("~", "–").replace("––", "–")        # Convert all tilde & en dashes to single en dash
-            utterance = utterance.replace(", ", "，").replace(",", "，").replace(";", "。").replace("…", "。") 
-            
+            utterance = utterance.replace(", ", "，").replace(",", "，").replace(";", "。").replace("…", "。")
+
             utterance = ' '.join(utterance.strip().split())
-            if (utterance[-1] == '，') or (utterance[-1] == "–"):   # Replace end if comma or dash
+            if (utterance[-1] == '，') or (utterance[-1] == '、') or (utterance[-1] == "–") or (utterance[-1] == "-"):   # Replace end if comma (multiple types) or dash/hyphen
                 utterance = ' '.join(utterance[:-1].strip().split()) + '。'
-            if (utterance[0] == '，')  or (utterance[0] == "–"):
-                utterance = utterance[1:]                           # Remove start if comma or dash
+            if (utterance[0] == '，') or (utterance[0] == '、') or (utterance[0] == "–"):
+                utterance = utterance[1:]                           # Remove start if comma (multiple types) or dash
             utterance = ' '.join(utterance.strip().split())
         else:
             utterance = utterance.replace("—", ", ").replace("–", ", ").replace(" -- ", ", ").replace("--", ", ")    # Convert all dash & double hyphen to comma
             utterance = utterance.replace(";", ", ")
-            
+
             utterance = ' '.join(utterance.strip().split())
-            if (utterance[-1] == ',') or (utterance[-1] == "-"):   # Replace end if comma or dash
+            if (utterance[-1] == ',') or (utterance[-1] == "-"):   # Replace end if comma or hyphen
                 utterance = ' '.join(utterance[:-1].strip().split()) + '.'
             if (utterance[0] == ',')  or (utterance[0] == "-"):
-                utterance = utterance[1:]                           # Remove start if comma or dash
+                utterance = utterance[1:]                           # Remove start if comma or hyphen
             utterance = ' '.join(utterance.strip().split())
         
         #Complicated edits after general punctuation cleanup
@@ -202,6 +204,7 @@ class MUSTC(Dataset):
         utterance = self.remove_speaker_two_name(utterance)
         utterance = utterance.replace(":", "")
 
+        utterance = self.replace_abbreviations(utterance, lang)
         utterance = self.replace_pauses(utterance, lang)
         utterance = utterance.replace("(", "").replace(")", "")
 	
@@ -213,6 +216,13 @@ class MUSTC(Dataset):
         if pair_type != None:
             utterance = self.add_terminator(utterance, end_characters[lang])
 
+        return utterance
+
+    def replace_abbreviations(self, utterance, lang):
+        abbreviations = {'en': {'Mr.': 'Mister', 'Ms.': 'Miss', 'Mrs.': 'Missus', 'Dr.': 'Doctor', 'St.': 'Saint', 'Jr.': 'Junior'}}
+        if lang in abbreviations.keys():
+            for k,v in abbreviations[lang].items():
+                utterance = utterance.replace(k, v)
         return utterance
 
     # Make sure all end characters are correct for the language (remove 'en' characters from other languages)
@@ -379,7 +389,8 @@ class MUSTC(Dataset):
         elif utterance == "<0>" or utterance == "<0> <0>" or utterance == "<0> <0> <0>":
             return utterance
 
-        if utterance[-1].isalnum():
+        # Check if sentence ends on alphanumeric or % (e.g., "That adds up to 20%")
+        if (utterance[-1].isalnum()) or (utterance[-1] == '%'):
             if lang == "zh":
                 utterance += "。"
             else:
@@ -394,14 +405,13 @@ class MUSTC(Dataset):
             index = utterance.find(end_character)
             #Repeats while end_character remaining
             while index != -1:
-                index += 1
                 #Conditional satisfied if end_character is last in utterance
-                if index == len(utterance):
+                if index+1 == len(utterance):
                     utterance = utterance + "<e>"
-                    continue
-                #Conditional satisfied if first char after end_character is not alphanumeric (indicating decimal, e.g., 1.7 billion or abbreviation, e.g., "U.S.") or second char after is lower (e.g., "in the U.S. there are ..." )
-                elif index + 1 < len(utterance) and not (utterance[index].isalnum() or utterance[index+1].islower()):
-                    utterance = utterance[:index] + "<e>" + utterance[index:]
+                # Conditional satisfied if not [char before is upper (end of abbreviation), char after is upper (start of abbreviation), or char after is numeric (indicating decimal) ]
+                elif not (((index-1 >= 0) and utterance[index-1].isupper()) or ((index+1 < len(utterance)) and (utterance[index+1].isupper())) or ((index+1 < len(utterance)) and (utterance[index+1].isnumeric()))):
+                    utterance = utterance[:index+1] + "<e>" + utterance[index+1:]
+                index += 1
                 index = utterance.find(end_character, index)
 
         return utterance
