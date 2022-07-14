@@ -332,7 +332,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.update_model_encoder(states)
 
     def policy(self, states):
-        print(f"States.units.source len: {len(states.units.source)}", flush=True)
+        print(f"States.units.source len: {len(states.units.source)}")
         if not getattr(states, "encoder_states", None):
             if states.finish_read():
                 return WRITE_ACTION
@@ -387,7 +387,7 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         index = index[0, 0].item()
 
-        print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
+        print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}")
 
         if (
             self.force_finish
@@ -432,6 +432,7 @@ class FairseqSimulSTAgent(SpeechAgent):
                         self.update_states_read(states)
                     else:
                         states.encoder_states = None
+            #print(f"Source len after flush: {len(states.units.source)}", flush=True)
             
             states.units.target = ListEntry()
             states.incremental_states = dict()

@@ -106,7 +106,7 @@ class MUSTC(Dataset):
                     # But makes assumption that there will "always" be a 2nd sentence, so could introduce odd behavior if evaluating on single-sentence dataset
                     
                     if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment["en"]) == 1) and (self.get_sentence_count(next_segment["en"]) == 1):
-                        pair_segment["en"] = cur_segment["en"] + next_segment["en"]
+                        pair_segment["en"] = cur_segment["en"] + " " + next_segment["en"]
                         pair_segment[lang] = cur_segment[lang] + " " + next_segment[lang]
                         pair_segment["duration"] = str( float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"]) )
 
@@ -158,36 +158,36 @@ class MUSTC(Dataset):
         end_characters = {'en': ['.', '?', '!'], 'de': ['.', '?', '!'], 'zh': ['。', '？', '！']}
 
         # General punctuation cleanup
-        utterance = utterance.replace("(Video)", "").replace("(video)", "")
-        utterance = utterance.replace("(Audio)", "").replace("(audio)", "")
-        utterance = utterance.replace("[", "").replace("]", "")
+        utterance = utterance.replace("(Video)", "").replace("(video)", "").replace("(Audio)", "").replace("(audio)", "")
+        utterance = utterance.replace("[", "").replace("]", "").replace("「", "").replace("」", "")
+        utterance = utterance.replace("“", "").replace("”", "").replace("\"", "").replace("＂", "").replace("《", ""). replace("》", "")
+        utterance = utterance.replace("（", "(").replace("）", ")").replace("：", ":").replace("；", ";")
         utterance = utterance.replace("’", "'").replace("‘", "'")
-        utterance = utterance.replace("“", "").replace("”", "").replace("\"", "")
-        utterance = utterance.replace("（", "(").replace("）", ")")
-        utterance = utterance.replace("：", ":")
-        utterance = utterance.replace(";", "")
+        utterance = utterance.replace("—", "–")                     # Convert all em dash to en dash
         utterance = utterance.replace(" / ", " ")
-        utterance = utterance.replace("—", "-")
-        utterance = re.sub("\u266A", " ", utterance)	# Remove music note
-        utterance = re.sub("\u266B", " ", utterance)	# Remove music note
+        utterance = utterance.replace("©", "").replace("®", "").replace("♪", "").replace("♫", "")
         
         if lang in ["zh"]:
-            utterance = utterance.replace(" -- ", "，").replace("--", "，")
-            utterance = utterance.replace("'", "")
-            utterance = utterance.replace("；", "。")
-            if utterance[-1] == '，': 
+            utterance = utterance.replace(" -- ", "--").replace("--", "，")                     # Convert all hyphen used for pause to commas
+            utterance = utterance.replace("~", "–").replace("––", "–")        # Convert all tilde & en dashes to single en dash
+            utterance = utterance.replace(", ", "，").replace(",", "，").replace(";", "。").replace("…", "。") 
+            if (utterance[-1] == '，') or (utterance[-1] == "–"):   # Replace end if comma or dash
                 utterance = utterance[:-1] + '。'
-            if utterance[0] == '，': 
-                utterance = utterance[1:]
+            if (utterance[0] == '，')  or (utterance[0] == "–"):
+                utterance = utterance[1:]                           # Remove start if comma or dash
         else:
-            utterance = utterance.replace(" -- ", " ").replace("--", "")
-            utterance = utterance.replace("-", " ")
-            utterance = utterance.replace(",", "")
+            utterance = utterance.replace("—", ", ").replace("–", ", ").replace(" -- ", ", ").replace("--", ", ")    # Convert all dash & double hyphen to comma
+            utterance = utterance.replace(";", ". ")
+            if (utterance[-1] == ',') or (utterance[-1] == "-"):   # Replace end if comma or dash
+                utterance = utterance[:-1] + '.'
+            if (utterance[0] == ',')  or (utterance[0] == "-"):
+                utterance = utterance[1:]                           # Remove start if comma or dash
         
         #Complicated edits after general punctuation cleanup
-        utterance = self.fix_end_characters(utterance, end_characters, lang)
         if lang not in ["zh"]:
             utterance = self.fix_and_remove_apostrophes(utterance)
+        else:
+            utterance = utterance.replace("'", "")
         
         utterance = self.remove_speaker_initials(utterance)
         utterance = self.remove_speaker_two_name(utterance)
@@ -196,11 +196,11 @@ class MUSTC(Dataset):
         utterance = self.replace_pauses(utterance, lang)
         utterance = utterance.replace("(", "").replace(")", "")
 	
+        utterance = self.fix_end_characters(utterance, end_characters, lang)
         utterance = self.remove_repeating_end(utterance, end_characters[lang], lang)
 
         utterance = utterance.strip()                    # Clean up white space at start/end of sentence
         utterance = ' '.join(utterance.split())          # Clean up white space within sentence
-
         utterance = self.check_no_end(utterance, lang)
         if pair_type != None:
             utterance = self.add_terminator(utterance, end_characters[lang])
@@ -312,7 +312,7 @@ class MUSTC(Dataset):
                 #Returns original utterance if not a capital letter(Not initials)
                 else:
                     return utterance
-            return utterance[index+2:]
+            return utterance[index+1:]
         return utterance
 
     #Removes the speakers first and last name from beginning of sentence
@@ -324,7 +324,7 @@ class MUSTC(Dataset):
         if index_space != -1 and index_colon != -1:
             #Condition satisfied if index_space is less than index_colon and word after space is capital and is the only other word before the colon
             if index_space < index_colon and utterance[index_space+1].isupper() and utterance[:index_colon].count(" ") <= 1:
-                return utterance[index_colon+2:]
+                return utterance[index_colon+1:]
         return utterance
 
     #Removes a repeating character from the end of sentences
