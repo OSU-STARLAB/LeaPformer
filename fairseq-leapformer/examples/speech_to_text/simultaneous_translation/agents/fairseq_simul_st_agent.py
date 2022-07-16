@@ -157,10 +157,8 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         self.force_finish = args.force_finish
         
-        self.continuous = args.continuous
         self.flush_method = args.flush_method
-        if self.continuous:
-            print(f"Enabled continuous mode with flush method: {self.flush_method}", flush=True)
+        print(f"Flush method set to: {self.flush_method}", flush=True)
 
         torch.set_grad_enabled(False)
 
@@ -197,7 +195,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         parser.add_argument("--max-len", type=int, default=200,
                             help="Max length of translation")
         parser.add_argument("--max-len-after-finish-read", type=int, default=25,
-                            help="Max length of translation after flush, if using continuous mode")
+                            help="Max length of translation after finished reading")
         parser.add_argument("--force-finish", default=False, action="store_true",
                             help="Force the model to finish the hypothsis if the source is not finished")
         parser.add_argument("--shift-size", type=int, default=SHIFT_SIZE,
@@ -210,10 +208,8 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="Acoustic feature dimension.")
         parser.add_argument("--waitk", type=int, default=None,
                             help="Wait-k delay for evaluation")
-        parser.add_argument("--continuous", default=False, action="store_true",
-                            help="Simulate continuous input by flushing states after every eos prediction.")
-        parser.add_argument("--flush-method", type=str, default="naive",
-                            help="Method to use when determining flush in continuous mode (see --continuous).")
+        parser.add_argument("--flush-method", type=str, default="none",
+                            help="Method used to flush state after each sentence and enable more continuous operation.")
 
         # fmt: on
         return parser
@@ -402,7 +398,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         return index
 
     def flush(self, states):
-        if self.continuous:
+        if (self.flush_method is not None) and (self.flush_method != "no_flush"):
             flush_method = self.flush_method
             
             #print(f"Source len before flush: {len(states.units.source)}", flush=True)
