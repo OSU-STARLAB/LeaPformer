@@ -244,7 +244,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.model.eval()
         self.model.share_memory()
 
-        print(self.model)
+        #print(self.model)
 
         if self.gpu:
             self.model.cuda()
@@ -270,27 +270,27 @@ class FairseqSimulSTAgent(SpeechAgent):
 
     def units_to_segment(self, units, states):
         # Merge sub word to full word.
-        if self.model.decoder.dictionary.eos() == units[0]:
-            return DEFAULT_EOS
         
-        if (
-            len(units) > 0
-            and self.model.decoder.dictionary.eos() == units[-1]
-            or len(states.units.target) > self.max_len
-            or self.past_finish_read > self.max_len_after_finish_read
+        if None in units.value:
+            units.value.remove(None)
+
+        # Check for special conditions
+        if len(units) < 1:
+            return None
+        elif (
+            (self.model.decoder.dictionary.eos() == units[-1])
+            or (('<e>' == self.model.decoder.dictionary.string([units[-1]])) and states.finish_read())
+            or (len(states.units.target) > self.max_len)
+            or (self.past_finish_read > self.max_len_after_finish_read)
         ):
             tokens = [self.model.decoder.dictionary.string([unit]) for unit in units]
             for j in range(len(units)):
                 units.pop()
             return ["".join(tokens).replace(BOW_PREFIX, "")] + [DEFAULT_EOS]
 
+        # Regular handling if no special conditions
         segment = []
-        if None in units.value:
-            units.value.remove(None)
-
         for index in units:
-            if index is None:
-                units.pop()
             token = self.model.decoder.dictionary.string([index])
             if token.startswith(BOW_PREFIX):
                 if len(segment) == 0:
@@ -311,6 +311,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         return None
 
     def update_model_encoder(self, states):
+        #print(f"States.units.source len: {len(states.units.source)}", flush=True)
         if len(states.units.source) == 0:
             return
         src_indices = self.to_device(
@@ -328,7 +329,6 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.update_model_encoder(states)
 
     def policy(self, states):
-        print(f"States.units.source len: {len(states.units.source)}")
         if not getattr(states, "encoder_states", None):
             if states.finish_read():
                 return WRITE_ACTION
@@ -383,7 +383,7 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         index = index[0, 0].item()
 
-        print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}")
+        #print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
 
         if (
             self.force_finish
@@ -421,10 +421,11 @@ class FairseqSimulSTAgent(SpeechAgent):
                     self.update_states_read(states)
                 elif flush_method == 'decoder_sync':    
                     # Flush number of elements from source that have been translated by decoder
-                    flush_amount = int( 0.75 * len(states.units.target)) * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio
-                    print(f"Flush amount: {flush_amount}", flush=True)
+                    #print(f"Target units: {states.units.target}", flush=True)
+                    flush_amount = int( 0.75 * len(states.units.target)  * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio )
+                    #print(f"Flush amount: {flush_amount}", flush=True)
                     states.units.source.value = states.units.source.value[flush_amount:]
-                    if len(states.units.source) > 0:
+                    if len(states.units.source) >= ( 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio):
                         self.update_states_read(states)
                     else:
                         states.encoder_states = None
