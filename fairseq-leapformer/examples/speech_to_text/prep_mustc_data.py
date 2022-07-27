@@ -73,7 +73,7 @@ class MUSTC(Dataset):
                 u = self.edit_utterance(u, _lang, pair_type)
                 segments[i][_lang] = u
 
-        if pair_type != None:
+        if (pair_type is not None) and (pair_type != "none"):
             print(f"Creating paired dataset with method: {pair_type}", flush=True)
             pair_segments = []
             for i, cur_segment in enumerate(segments):
@@ -199,15 +199,16 @@ class MUSTC(Dataset):
             utterance = self.fix_and_remove_apostrophes(utterance)
         else:
             utterance = utterance.replace("'", "")
-        
-        utterance = self.remove_speaker_initials(utterance)
-        utterance = self.remove_speaker_two_name(utterance)
-        utterance = utterance.replace(":", "")
 
         utterance = self.replace_abbreviations(utterance, lang)
         utterance = self.replace_pauses(utterance, lang)
+        utterance = self.replace_non_spoken(utterance, lang)
         utterance = utterance.replace("(", "").replace(")", "")
-	
+
+        utterance = self.remove_speaker_initials(utterance)
+        utterance = self.remove_speaker_two_name(utterance, lang)
+        utterance = utterance.replace(":", "")
+
         utterance = self.fix_end_characters(utterance, end_characters, lang)
         utterance = self.remove_repeating_end(utterance, end_characters[lang], lang)
 
@@ -316,33 +317,60 @@ class MUSTC(Dataset):
             index = utterance.find("'", index)
         return utterance
 
+    def replace_non_spoken(self, utterance, lang):
+        # Remove extra notes made by captioner that are not actually spoken
+        if lang in 'zh':
+            # Remove any translations by captioner in parentheses
+            index_start = utterance.find("(")
+            while index_start != -1:
+                index_end = utterance.find(")", index_start)
+                if index_end == -1:
+                    break
+
+                segment = utterance[index_start:index_end+1]
+                # isascii() is convenient way to check for all English characters
+                if segment.isascii():
+                    utterance = utterance[:index_start] + utterance[index_end+1:]
+
+                index_start = utterance.find("(", index_start + 1)
+        return utterance
+
     #Removes the speakers initials if it comes before a sentence
     def remove_speaker_initials(self, utterance):
         #Finds index of first :
         index = utterance.find(":")
-        #Conditional satisfied if : located in utterance
-        if index != -1:
-            #Loops until index
-            for i in range(index):
-                #Continues if character in utterance is capitalized
-                if utterance[i].isupper():
-                    continue
-                #Returns original utterance if not a capital letter(Not initials)
-                else:
-                    return utterance
+        #Conditional satisfied if colon located in utterance AND
+        #   entire sub-string before colon is uppercase
+        if (index != -1) and (utterance[0:index].isupper()):
             return utterance[index+1:]
-        return utterance
+        else:
+            return utterance
 
     #Removes the speakers first and last name from beginning of sentence
-    def remove_speaker_two_name(self, utterance):
+    def remove_speaker_two_name(self, utterance, lang):
+        # Check for names in English
         #Finds index of : and space
         index_colon = utterance.find(":")
         index_space = utterance.find(" ")
-        #Condition satisfied if both : and space present
-        if index_space != -1 and index_colon != -1:
-            #Condition satisfied if index_space is less than index_colon and word after space is capital and is the only other word before the colon
-            if index_space < index_colon and utterance[index_space+1].isupper() and utterance[:index_colon].count(" ") <= 1:
+        # Condition satisfied if both colon and space present, and space before colon
+        if (index_space != -1) and (index_colon != -1) and (index_space < index_colon):
+            #Condition satisfied if only one space before colon (i.e., one word) and
+            #  word after space starts with upper
+            #  and, if space after colon, then not lower after that
+            if (utterance[:index_colon].count(" ") == 1) and (utterance[index_space+1].isupper()) and not (index_colon+2<len(utterance) and utterance[index_colon+1]==" " and utterance[index_colon+2].islower()):
                 return utterance[index_colon+1:]
+            
+        # Check for names in other languages
+        if lang in ['zh']:
+            # Find index of : and · (middle dot) -- this assumes we converted all colons to :
+            index_colon = utterance.find(":")
+            index_dot = utterance.find("·")
+            # Condition satisfied if both colon and mid dot present and mid dot present colon
+            if (index_dot != -1) and (index_colon != -1) and (index_dot < index_colon):
+                # Condition satisfied if everything before colon (except dot) is alphabetic or space (except dot) AND
+                #    index_colon < 10 (approximate rule to prevent big mistakes)
+                if all(x.isalpha() or x.isspace() for x in utterance[0:index_dot]+utterance[index_dot+1:index_colon]) and (index_colon < 10):
+                    return utterance[index_colon+1:]
         return utterance
 
     #Removes a repeating character from the end of sentences
