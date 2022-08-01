@@ -17,7 +17,7 @@ import re
 import numpy as np
 import pandas as pd
 import soundfile as sf
-from examples.speech_to_text.data_utils_prep import (
+from examples.speech_to_text.data_utils import (
     create_zip,
     extract_fbank_features,
     filter_manifest_df,
@@ -32,7 +32,7 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from fairseq.data.audio.audio_utils_prep import get_waveform
+from fairseq.data.audio.audio_utils import get_waveform, convert_waveform
 
 
 log = logging.getLogger(__name__)
@@ -85,27 +85,27 @@ class MUSTC(Dataset):
                 pair_segment["speaker_id"] += "_pair"
 
                 if (pair_type == "partial") or (pair_type == "original+partial") :
-                    # 'Partial' method uses 1.5 seconds of audio from the next segment, but none of the text
+                    # 'Partial' method uses 1.5 seconds of audio from another segment, but none of the text
                     # This method aims to make model aware of potential for subsequent sentences
                     # Placing the end of context token <e> therefore requires learning to ignore audio after the current sentence
                     
-                    # Only combine segments with 1 sentence each, since we don't have knowledge of where to cut audio
-                    if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment["en"]) == 1) and (self.get_sentence_count(next_segment["en"]) == 1):
+                    # Only use cur_segment with one sentence, but don't care about next_segment length since we're only using a small amount of audio anyways
+                    if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment[lang]) == 1) and (self.get_sentence_count(next_segment[lang]) >= 1):
                         pair_segment["en"] = cur_segment["en"]
                         pair_segment[lang] = cur_segment[lang]
-                        
+
                         base_duration = float(next_segment["offset"]) - float(cur_segment["offset"])        # Time before first word of next segment
                         pair_duration = base_duration + min(1.5, float(next_segment["duration"]))           # Add either 1.5 seconds or duration of next segment
-                        pair_segment["duration"] = str( pair_duration ) 
+                        pair_segment["duration"] = str( pair_duration )
 
                         pair_segments.append(pair_segment)
 
                 elif (pair_type == "full") or (pair_type == "original+full"):
                     # 'Full' method uses all audio & text from the next sentence/segment
-                    # This method aims to make model aware of potential contextual information
+                    # This method aims to make model aware of potential contextual information, or just consistency across sentences
                     # But makes assumption that there will "always" be a 2nd sentence, so could introduce odd behavior if evaluating on single-sentence dataset
                     
-                    if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment["en"]) == 1) and (self.get_sentence_count(next_segment["en"]) == 1):
+                    if (next_segment is not None) and (cur_segment["wav"] == next_segment["wav"]) and (self.get_sentence_count(cur_segment[lang]) == 1) and (self.get_sentence_count(next_segment[lang]) == 1):
                         pair_segment["en"] = cur_segment["en"] + " " + next_segment["en"]
                         pair_segment[lang] = cur_segment[lang] + " " + next_segment[lang]
                         pair_segment["duration"] = str( float(next_segment["offset"]) - float(cur_segment["offset"]) + float(next_segment["duration"]) )
@@ -143,6 +143,7 @@ class MUSTC(Dataset):
                     )
                 )
 
+
     def __getitem__(self, n: int) -> Tuple[torch.Tensor, int, str, str, str, str]:
         wav_path, offset, n_frames, sr, src_utt, tgt_utt, spk_id, utt_id = self.data[n]
         waveform, _ = get_waveform(wav_path, frames=n_frames, start=offset)
@@ -152,7 +153,7 @@ class MUSTC(Dataset):
     def __len__(self) -> int:
         return len(self.data)
 
-    #Edits the utterance by removing unecessary punctuations and adding special characters      
+    #Edits the utterance by removing unecessary punctuations and adding special characters
     def edit_utterance(self, utterance, lang, pair_type):
 
         end_characters = {'en': ['.', '?', '!'], 'de': ['.', '?', '!'], 'zh': ['。', '？', '！']}
@@ -193,7 +194,7 @@ class MUSTC(Dataset):
             if (utterance[0] == ',')  or (utterance[0] == "-"):
                 utterance = utterance[1:]                           # Remove start if comma or hyphen
             utterance = ' '.join(utterance.strip().split())
-        
+
         #Complicated edits after general punctuation cleanup
         if lang not in ["zh"]:
             utterance = self.fix_and_remove_apostrophes(utterance)
@@ -228,23 +229,15 @@ class MUSTC(Dataset):
 
     # Make sure all end characters are correct for the language (remove 'en' characters from other languages)
     def fix_end_characters(self, utterance, end_characters, lang):
-        #print(f"Checking utterance: {utterance}", flush=True)
         for end_char_idx in list(range(len(end_characters['en']))):
             check_char = end_characters['en'][end_char_idx]
             index = utterance.find(end_characters['en'][end_char_idx])
             while index != -1:
-                #print(f"index: {index}, len(utterance): {len(utterance)}", flush=True)
-                #print(f"Char at index: {utterance[index]}", flush=True)
-                #if index+1 < len(utterance):
-                #    print(f"Char at index+1: {utterance[index+1]}", flush=True)
-
                 # If end of sentence, always replace
                 if index+1 == len(utterance):
-                #    print("Condition 1 met")
                     utterance = utterance[:index] + end_characters[lang][end_char_idx]
                 # Substitute en character unless followed by english character or number
                 elif not (utterance[index+1].isascii() and utterance[index+1].isalnum()):
-                #    print("Condition 2 met")
                     utterance = utterance[:index] + end_characters[lang][end_char_idx] + utterance[index+1:]
                 index = utterance.find(end_characters['en'][end_char_idx], index+1)
         return utterance
@@ -279,7 +272,7 @@ class MUSTC(Dataset):
                         index_start = utterance.find("(", index_start + 1)
 
         return utterance
-        
+
     def fix_and_remove_apostrophes(self, utterance):
         # First loop: fix apostrophes
         #Finds index of first apostrophe
@@ -287,7 +280,7 @@ class MUSTC(Dataset):
         while index != -1:
             # One condition to fix:
             # apostrophe has char + space before and space + word after, with word after being <= 2 chars (most likely contraction or possession)
-            # e.g., They ' re , We ' ve , He ' s   
+            # e.g., They ' re , We ' ve , He ' s
             if (index-2 >=0 and index+3 < len(utterance)) and \
               (utterance[index-2].isalpha() and utterance[index-1]==' ' and utterance[index+1]==' ' and utterance[index+2].isalpha() and utterance[index+3]==' '):
                 utterance = utterance[:index-1] + "'" + utterance[index+2:] # Chop out spaces
@@ -295,8 +288,8 @@ class MUSTC(Dataset):
               (utterance[index-2].isalpha() and utterance[index-1]==' ' and utterance[index+1]==' ' and utterance[index+2].isalpha() and utterance[index+3].isalpha() and utterance[index+4]==' '):
                 utterance = utterance[:index-1] + "'" + utterance[index+2:] # Chop out spaces
             index+=1
-            index = utterance.find("'", index)   
-                
+            index = utterance.find("'", index)
+
         # Second loop: remove undesired apostrophes
         #Finds index of first '
         index = utterance.find("'")
@@ -359,7 +352,7 @@ class MUSTC(Dataset):
             #  and, if space after colon, then not lower after that
             if (utterance[:index_colon].count(" ") == 1) and (utterance[index_space+1].isupper()) and not (index_colon+2<len(utterance) and utterance[index_colon+1]==" " and utterance[index_colon+2].islower()):
                 return utterance[index_colon+1:]
-            
+
         # Check for names in other languages
         if lang in ['zh']:
             # Find index of : and · (middle dot) -- this assumes we converted all colons to :
@@ -404,10 +397,10 @@ class MUSTC(Dataset):
                 #Conditional satisfied if at end of sentence
                 elif end_idx == len(utterance):
                     utterance = utterance[0:start_idx] + end_character
-            
+
                 #Finds the index of next end_character
                 start_idx = end_idx = utterance.find(end_character)
-        
+
         return utterance
 
     # Checks/adds terminating character if utterance does not already end with terminating character (i.e., sentence)
@@ -425,7 +418,7 @@ class MUSTC(Dataset):
                 utterance += "."
 
         return utterance
-    
+
     #Adds <e> after designated end_character
     def add_terminator(self, utterance, end_characters):
         for end_character in end_characters:
@@ -459,52 +452,64 @@ def process(args):
             print(f"{cur_root.as_posix()} does not exist. Skipped.")
             continue
         # Extract features
-        feature_root = cur_root / "fbank80"
-        feature_root.mkdir(exist_ok=True)
+        audio_root = cur_root / ("flac" if args.use_audio_input else "fbank80")
+        audio_root.mkdir(exist_ok=True)
+
         for split in MUSTC.SPLITS:
             print(f"Fetching split {split}...", flush=True)
             dataset = MUSTC(root.as_posix(), lang, split, args.pair_type)
-            print("Extracting log mel filter bank features...", flush=True)
-            if split == 'train' and args.cmvn_type == "global":
-                print("And estimating cepstral mean and variance stats...", flush=True)
+            if args.use_audio_input:
+                print("Converting audios...", flush=True)
+                for waveform, sample_rate, _, _, _, utt_id in tqdm(dataset):
+                    tgt_sample_rate = 16_000
+                    _wavform, _ = convert_waveform(
+                        waveform, sample_rate, to_mono=True,
+                        to_sample_rate=tgt_sample_rate
+                    )
+                    sf.write(
+                        (audio_root / f"{utt_id}.flac").as_posix(),
+                        _wavform.T.numpy(), tgt_sample_rate
+                    )
+            else:
+                print("Extracting log mel filter bank features...", flush=True)
                 gcmvn_feature_list = []
+                if split == 'train' and args.cmvn_type == "global":
+                    print("And estimating cepstral mean and variance stats...", flush=True)
 
-            for waveform, sample_rate, _, _, _, utt_id in tqdm(dataset):
-                features = extract_fbank_features(waveform, sample_rate)
-
-                np.save(
-                    (feature_root / f"{utt_id}.npy").as_posix(),
-                    features
-                )
+                for waveform, sample_rate, _, _, _, utt_id in tqdm(dataset):
+                    features = extract_fbank_features(
+                        waveform, sample_rate, audio_root / f"{utt_id}.npy"
+                    )
+                    if split == 'train' and args.cmvn_type == "global":
+                        if len(gcmvn_feature_list) < args.gcmvn_max_num:
+                            gcmvn_feature_list.append(features)
 
                 if split == 'train' and args.cmvn_type == "global":
-                    if len(gcmvn_feature_list) < args.gcmvn_max_num:
-                        gcmvn_feature_list.append(features)
-
-            if split == 'train' and args.cmvn_type == "global":
-                # Estimate and save cmv
-                stats = cal_gcmvn_stats(gcmvn_feature_list)
-                with open(cur_root / "gcmvn.npz", "wb") as f:
-                    np.savez(f, mean=stats["mean"], std=stats["std"])
+                    # Estimate and save cmv
+                    stats = cal_gcmvn_stats(gcmvn_feature_list)
+                    with open(cur_root / "gcmvn.npz", "wb") as f:
+                        np.savez(f, mean=stats["mean"], std=stats["std"])
 
         # Pack features into ZIP
-        zip_path = cur_root / "fbank80.zip"
-        print("ZIPing features...", flush=True)
-        create_zip(feature_root, zip_path)
-        print("Fetching ZIP manifest...")
-        zip_manifest = get_zip_manifest(zip_path)
+        zip_path = cur_root / f"{audio_root.name}.zip"
+        print("ZIPing audios/features...", flush=True)
+        create_zip(audio_root, zip_path)
+        print("Fetching ZIP manifest...", flush=True)
+        audio_paths, audio_lengths = get_zip_manifest(
+            zip_path,
+            is_audio=args.use_audio_input,
+        )
         # Generate TSV manifest
-        print("Generating manifest...")
+        print("Generating manifest...", flush=True)
         train_text = []
         for split in MUSTC.SPLITS:
             is_train_split = split.startswith("train")
             manifest = {c: [] for c in MANIFEST_COLUMNS}
             dataset = MUSTC(args.data_root, lang, split, args.pair_type)
-            for wav, sr, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
+            for _, _, src_utt, tgt_utt, speaker_id, utt_id in tqdm(dataset):
                 manifest["id"].append(utt_id)
-                manifest["audio"].append(zip_manifest[utt_id])
-                duration_ms = int(wav.size(1) / sr * 1000)
-                manifest["n_frames"].append(int(1 + (duration_ms - 25) / 10))
+                manifest["audio"].append(audio_paths[utt_id])
+                manifest["n_frames"].append(audio_lengths[utt_id])
                 manifest["tgt_text"].append(src_utt if args.task == "asr" else tgt_utt)
                 manifest["speaker"].append(speaker_id)
             if is_train_split:
@@ -524,22 +529,31 @@ def process(args):
                 cur_root / spm_filename_prefix,
                 args.vocab_type,
                 args.vocab_size,
-                special_symbols=special_symbols
+                special_symbols=special_symbols,
             )
         # Generate config YAML
-        gen_config_yaml(
-            cur_root,
-            spm_filename_prefix + ".model",
-            yaml_filename=f"config_{args.task}.yaml",
-            specaugment_policy="lb",
-            cmvn_type=args.cmvn_type,
-            gcmvn_path=(
-                cur_root / "gcmvn.npz" if args.cmvn_type == "global"
-                else None
-            ),
-        )
+        if args.use_audio_input:
+            gen_config_yaml(
+                cur_root,
+                spm_filename=spm_filename_prefix + ".model",
+                yaml_filename=f"config_{args.task}.yaml",
+                specaugment_policy=None,
+                extra={"use_audio_input": True}
+            )
+        else:
+            gen_config_yaml(
+                cur_root,
+                spm_filename=spm_filename_prefix + ".model",
+                yaml_filename=f"config_{args.task}.yaml",
+                specaugment_policy="lb",
+                cmvn_type=args.cmvn_type,
+                gcmvn_path=(
+                    cur_root / "gcmvn.npz" if args.cmvn_type == "global"
+                    else None
+                ),
+            )
         # Clean up
-        shutil.rmtree(feature_root)
+        shutil.rmtree(audio_root)
 
 
 def process_joint(args):
@@ -568,7 +582,7 @@ def process_joint(args):
     # Generate config YAML
     gen_config_yaml(
         cur_root,
-        spm_filename_prefix + ".model",
+        spm_filename=spm_filename_prefix + ".model",
         yaml_filename=f"config_{args.task}.yaml",
         specaugment_policy="ld",
         prepend_tgt_lang_tag=(args.task == "st"),
@@ -603,12 +617,14 @@ def main():
                             "Maximum number of sentences to use to estimate"
                             "global mean and variance"
                             ))
+    parser.add_argument("--use-audio-input", action="store_true")
     parser.add_argument("--langs-to-process", nargs='+', default=[], help="List of MUSTC languages to process")
     parser.add_argument("--pair-type", default=None, type=str, help="Method to create paired sentence dataset, if desired")
     args = parser.parse_args()
+
     print(f"Args: {args}", flush=True)
     assert len(args.langs_to_process) > 0, "You must specify target language(s) using --langs-to-process"
-    
+
     if args.joint:
         process_joint(args)
     else:

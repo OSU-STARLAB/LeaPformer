@@ -15,8 +15,7 @@ import numpy as np
 import pandas as pd
 import sentencepiece as sp
 from fairseq.data.audio.audio_utils import (
-    convert_waveform, _get_kaldi_fbank, _get_torchaudio_fbank, is_npy_data,
-    is_sf_audio_data
+    convert_waveform, _get_kaldi_fbank, _get_torchaudio_fbank, is_npy_data, is_sf_audio_data
 )
 import torch
 import soundfile as sf
@@ -81,8 +80,7 @@ def extract_fbank_features(
         return
 
     _waveform, _ = convert_waveform(waveform, sample_rate, to_mono=True)
-    # Kaldi compliance: 16-bit signed integers
-    _waveform = _waveform * (2 ** 15)
+    _waveform = _waveform * (2 ** 15)  # Kaldi compliance: 16-bit signed integers
     _waveform = _waveform.numpy()
 
     features = _get_kaldi_fbank(_waveform, sample_rate, n_mel_bins)
@@ -163,6 +161,7 @@ def gen_config_yaml(
         "ld": writer.set_specaugment_ld_policy,
         "sm": writer.set_specaugment_sm_policy,
         "ss": writer.set_specaugment_ss_policy,
+        "st": writer.set_specaugment_st_policy,
     }
     specaugment_setter = specaugment_setters.get(specaugment_policy, None)
     if specaugment_setter is not None:
@@ -354,6 +353,16 @@ class S2TDataConfigWriter(object):
             time_mask_n=2,
             time_mask_t=70,
             time_mask_p=0.2,
+        )
+
+    def set_specaugment_st_policy(self):
+        self.set_specaugment(
+            time_wrap_w=0,
+            freq_mask_n=2,
+            freq_mask_f=10,
+            time_mask_n=5,
+            time_mask_t=50,
+            time_mask_p=1.0,
         )
 
     def set_input_channels(self, input_channels: int = 1):
