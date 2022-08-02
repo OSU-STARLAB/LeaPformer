@@ -472,8 +472,8 @@ def process(args):
                     )
             else:
                 print("Extracting log mel filter bank features...", flush=True)
-                gcmvn_feature_list = []
                 if split == 'train' and args.cmvn_type == "global":
+                    gcmvn_feature_list = []
                     print("And estimating cepstral mean and variance stats...", flush=True)
 
                 for waveform, sample_rate, _, _, _, utt_id in tqdm(dataset):
@@ -481,7 +481,7 @@ def process(args):
                         waveform, sample_rate, audio_root / f"{utt_id}.npy"
                     )
                     if split == 'train' and args.cmvn_type == "global":
-                        if len(gcmvn_feature_list) < args.gcmvn_max_num:
+                        if (len(gcmvn_feature_list) < args.gcmvn_max_num) and (features is not None):
                             gcmvn_feature_list.append(features)
 
                 if split == 'train' and args.cmvn_type == "global":
@@ -548,8 +548,7 @@ def process(args):
                 specaugment_policy="lb",
                 cmvn_type=args.cmvn_type,
                 gcmvn_path=(
-                    cur_root / "gcmvn.npz" if args.cmvn_type == "global"
-                    else None
+                    cur_root / "gcmvn.npz" if args.cmvn_type == "global" else None
                 ),
             )
         # Clean up
