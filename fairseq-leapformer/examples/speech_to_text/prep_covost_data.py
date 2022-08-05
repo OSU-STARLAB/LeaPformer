@@ -196,8 +196,8 @@ class CoVoST(Dataset):
                         pair_segment["sentence"] = cur_segment["sentence"]
                         pair_segment["translation"] = cur_segment["translation"]
                         
-                        idx = pair_segment["path"].find(".mp3")
-                        pair_segment["path"] = pair_segment["path"][:idx] + "_pair.mp3"
+                        idx = pair_segment["path"].find(".wav")
+                        pair_segment["path"] = pair_segment["path"][:idx] + "_pair.wav"
                         
                         pair_segments.append(pair_segment)
 
@@ -221,8 +221,8 @@ class CoVoST(Dataset):
                         pair_segment["sentence"] = cur_segment["sentence"] + " " + next_segment["sentence"]
                         pair_segment["translation"] = cur_segment["translation"] + " " + next_segment["translation"]
                         
-                        idx = pair_segment["path"].find(".mp3")
-                        pair_segment["path"] = pair_segment["path"][:idx] + "_pair.mp3"
+                        idx = pair_segment["path"].find(".wav")
+                        pair_segment["path"] = pair_segment["path"][:idx] + "_pair.wav"
                         
                         pair_segments.append(pair_segment)
                          
@@ -276,7 +276,7 @@ class CoVoST(Dataset):
         sentence = data["sentence"]
         translation = None if self.no_translation else data["translation"]
         speaker_id = data["client_id"]
-        _id = data["path"].replace(".mp3", "")
+        _id = data["path"].replace(".wav", "")
         return waveform, sample_rate, sentence, translation, speaker_id, _id
 
     def __len__(self) -> int:

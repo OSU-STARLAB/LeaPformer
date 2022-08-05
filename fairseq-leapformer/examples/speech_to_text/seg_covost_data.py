@@ -13,6 +13,7 @@ from examples.speech_to_text.prep_covost_data import (
 )
 
 from tqdm import tqdm
+import torchaudio
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ def main(args):
     f_text = open(output / f"{split}.{tgt_lang}", "w")
     f_wav_list = open(output / f"{split}.wav_list", "w")
     for waveform, sample_rate, _, text, _, utt_id in tqdm(dataset):
+        if sample_rate != 16000:
+            print(f"Sample rate: {sample_rate}", flush=True)
+            resampler = torchaudio.transforms.Resample(sample_rate, 16000, dtype=waveform.dtype)
+            waveform = resampler(waveform)
+            sample_rate = 16000
         sf.write(
             output / f"{utt_id}.wav",
             waveform.squeeze(0).numpy(),
