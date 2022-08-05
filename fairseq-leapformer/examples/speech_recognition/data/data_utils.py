@@ -91,7 +91,7 @@ def encoder_padding_mask_to_lengths(
 
         device: which device to put the result on
     """
-    if encoder_padding_mask is None:
+    if encoder_padding_mask == []:
         return torch.Tensor([max_lengths] * batch_size).to(torch.int32).to(device)
 
     assert encoder_padding_mask.size(0) == max_lengths, "max_lengths does not match"

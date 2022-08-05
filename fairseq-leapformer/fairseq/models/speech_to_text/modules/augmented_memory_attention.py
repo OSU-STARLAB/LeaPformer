@@ -4,13 +4,13 @@
 # LICENSE file in the root directory of this source tree.
 
 from typing import Tuple, List
+from itertools import groupby
 
 import torch
 import torch.nn.functional as F
 from fairseq.models import FairseqEncoder
-from fairseq.data.data_utils import lengths_to_padding_mask
 from fairseq.models.speech_to_text import (
-    ConvTransformerEncoder,
+    ConvTransformerEncoder, CTCCompressStrategy,
 )
 from fairseq.models.speech_to_text.utils import attention_suppression
 from fairseq.models.speech_to_text.utils import (
@@ -20,6 +20,7 @@ from fairseq.models.speech_to_text.utils import (
 )
 from fairseq.modules import MultiheadAttention, TransformerEncoderLayer
 from torch import nn, Tensor
+import json
 
 # ------------------------------------------------------------------------------
 #   AugmentedMemoryConvTransformerEncoder
@@ -27,8 +28,8 @@ from torch import nn, Tensor
 
 
 class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
-    def __init__(self, args):
-        super().__init__(args)
+    def __init__(self, args, dictionary):
+        super().__init__(args, dictionary)
 
         args.encoder_stride = self.stride()
 
@@ -40,17 +41,39 @@ class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
         self.right_context_after_stride = args.right_context // args.encoder_stride
 
         self.transformer_layers = nn.ModuleList([])
-        self.transformer_layers.extend(
-            [
-                AugmentedMemoryTransformerEncoderLayer(args)
-                for i in range(args.encoder_layers)
-            ]
-        )
+
+        # Layer sharing code
+        encoder_weight_share_list = getattr(args, "share_encoder_ffn_attn_layer", None)
+        if encoder_weight_share_list is None:
+            encoder_weight_share_list = []
+        else:
+            shared_weights_layer = AugmentedMemoryTransformerEncoderLayer(args)
+        print(f"Encoder: Sharing layers: {encoder_weight_share_list}")
+        for layer_idx in range(args.encoder_layers):
+            if layer_idx+1 in encoder_weight_share_list:
+                self.transformer_layers.append(shared_weights_layer)
+            else:
+                self.transformer_layers.append(AugmentedMemoryTransformerEncoderLayer(args))
+
+        self.share_mem_bank_layers = args.share_mem_bank_layers
 
     def stride(self):
         # Hard coded here. Should infer from convs in future
         stride = 4
         return stride
+
+    def initialize_states(self, states):
+        if states is None:
+            # Creates states;
+            states = [{"memory_banks": [], "encoder_states": None} for i in range(len(self.transformer_layers))]
+            if self.share_mem_bank_layers is not None:
+                # Initializes Memory banks
+                rows = len(self.share_mem_bank_layers)
+                for i in range(rows):
+                    cols = len(self.share_mem_bank_layers[i]);
+                    for j in range(cols):
+                        states[self.share_mem_bank_layers[i][j]]["memory_banks"] = states[self.share_mem_bank_layers[i][0]]["memory_banks"]
+        return states
 
     def forward(self, src_tokens, src_lengths, states=None):
         """Encode input sequence.
@@ -71,10 +94,9 @@ class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
         x = self.out(x)
         x = self.embed_scale * x
 
-        #subsampling_factor = 1.0 * max_seq_len / output_seq_len
-        subsampling_factor = int(max_seq_len * 1.0 / output_seq_len + 0.5)
+        subsampling_factor = max_seq_len * 1.0 / output_seq_len
 
-        input_lengths = torch.max(
+        input_lengths = torch.min(
             (src_lengths.float() / subsampling_factor).ceil().long(),
             x.size(0) * src_lengths.new_ones([src_lengths.size(0)]).long(),
         )
@@ -83,7 +105,6 @@ class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
             input_lengths, batch_first=True
         )
 
-        # TODO: fix positional embedding
         positions = self.embed_positions(encoder_padding_mask).transpose(0, 1)
 
         x += positions
@@ -91,32 +112,36 @@ class AugmentedMemoryConvTransformerEncoder(ConvTransformerEncoder):
         x = F.dropout(x, p=self.dropout, training=self.training)
 
         # State to store memory banks etc.
-        if states is None:
-            states = [
-                {"memory_banks": None, "encoder_states": None}
-                for i in range(len(self.transformer_layers))
-            ]
+        states = self.initialize_states(states)
+        #print("states after initialize_states: ", states)
 
         for i, layer in enumerate(self.transformer_layers):
             # x size:
             # (self.left_size + self.segment_size + self.right_size)
             # / self.stride, num_heads, dim
-            # TODO: Consider mask here
-            x = layer(x, states[i])
-            states[i]["encoder_states"] = x[
-                self.left_context_after_stride : -self.right_context_after_stride
-            ]
+            # TODO: Consider mask here 
+            x = layer(x, states[i], i)
+            if self.right_context_after_stride != 0:
+                states[i]["encoder_states"] = x[self.left_context_after_stride : -self.right_context_after_stride]
+            else:
+                states[i]["encoder_states"] = x[self.left_context_after_stride : ]
 
-        lengths = (
-            (
-                ~encoder_padding_mask[
-                    :, self.left_context_after_stride : -self.right_context_after_stride
-                ]
+        if self.right_context_after_stride != 0:
+            lengths = (
+                (
+                    ~encoder_padding_mask[:, self.left_context_after_stride : -self.right_context_after_stride]
+                )
+                .sum(dim=1, keepdim=True)
+                .long()
             )
-            .sum(dim=1, keepdim=True)
-            .long()
-        )
-
+        else:
+            lengths = (
+                (
+                    ~encoder_padding_mask[:, self.left_context_after_stride :]
+                )
+                .sum(dim=1, keepdim=True)
+                .long()
+            )
         return states[-1]["encoder_states"], lengths, states
 
 
@@ -129,8 +154,11 @@ class AugmentedMemoryTransformerEncoderLayer(TransformerEncoderLayer):
 
         self.left_context = args.left_context // args.encoder_stride
         self.right_context = args.right_context // args.encoder_stride
+        self.increase_context = args.increase_context
 
-    def forward(self, x, state):
+        self.share_mem_bank_layers = args.share_mem_bank_layers
+
+    def forward(self, x, state, layer_num):
 
         length, batch_size, x_dim = x.size()
 
@@ -139,12 +167,11 @@ class AugmentedMemoryTransformerEncoderLayer(TransformerEncoderLayer):
         if self.normalize_before:
             x = self.self_attn_layer_norm(x)
 
-        # init_state
-        if state.get("memory_banks", None) is None:
-            state["memory_banks"] = []
-
         # TODO reseach new sum_query method
-        seg_start = self.left_context
+        if self.increase_context:
+            seg_start = 0
+        else:
+            seg_start = self.left_context
         seg_end = length - self.right_context
 
         if seg_start < seg_end:
@@ -154,9 +181,10 @@ class AugmentedMemoryTransformerEncoderLayer(TransformerEncoderLayer):
 
         x = torch.cat([x, summarization_query], dim=0)
 
-        x = self.self_attn(input_and_summary=x, state=state)
+        x = self.self_attn(input_and_summary=x, state=state, layer_num=layer_num)
 
         x = self.dropout_module(x)
+
         x = residual + x
 
         if not self.normalize_before:
@@ -186,6 +214,7 @@ class AugmentedMemoryTransformerEncoderLayer(TransformerEncoderLayer):
             qn_block_size=self.quant_noise_block_size,
             tanh_on_mem=True,
             max_memory_size=args.max_memory_size,
+            share_mem_bank_layers=args.share_mem_bank_layers,
         )
 
 
@@ -219,6 +248,7 @@ class AugmentedMemoryMultiheadAttention(MultiheadAttention):
         std_scale=0.5,  # 0.5 based on https://arxiv.org/abs/2005.09137
         max_memory_size=-1,
         disable_mem_on_mem_attn=True,
+        share_mem_bank_layers=None,
     ):
         super().__init__(
             embed_dim,
@@ -251,7 +281,27 @@ class AugmentedMemoryMultiheadAttention(MultiheadAttention):
 
         self.max_memory_size = max_memory_size
 
-    def forward(self, input_and_summary, state):
+        self.share_mem_bank_layers = share_mem_bank_layers
+
+    def update_mem_banks(self, state, output_and_memory, layer_num):
+        if self.share_mem_bank_layers is not None:
+          if not any(layer_num in layer for layer in self.share_mem_bank_layers):
+            next_m = output_and_memory[-1:]
+            next_m = self.squash_mem(next_m)
+            state["memory_banks"].append(next_m)
+          else:
+            for pairs in self.share_mem_bank_layers:
+                if layer_num == pairs[0]:
+                    next_m = output_and_memory[-1:]
+                    next_m = self.squash_mem(next_m)
+                    state["memory_banks"].append(next_m)        
+        else:
+            next_m = output_and_memory[-1:]
+            next_m = self.squash_mem(next_m)
+            state["memory_banks"].append(next_m) 
+        return state
+
+    def forward(self, input_and_summary, state, layer_num):
         """
         input: Encoder states of current segment with left or right context,
             plus one summarization query
@@ -265,11 +315,8 @@ class AugmentedMemoryMultiheadAttention(MultiheadAttention):
         # TODO: positional embedding on memory
 
         if self.max_memory_size > -1 and len(memory) > self.max_memory_size:
-            # TODO: need to fix here
-            if self.max_memory_size == 0:
-                memory = memory.new_zeros(1, memory.size(1), self.memory_dim)
-            else:
-                memory = memory[-self.max_memory_size :]
+            memory = memory[-self.max_memory_size :]
+            state["memory_banks"] = memory
 
         memory_and_input = torch.cat(memory + [input_and_summary[:-1]], dim=0)
         input_and_sum_query = input_and_summary
@@ -297,15 +344,15 @@ class AugmentedMemoryMultiheadAttention(MultiheadAttention):
         )
 
         attention_weights = torch.bmm(q, k.transpose(1, 2))
-
+        
         if self.disable_mem_on_mem_attn:
             attention_weights = self.suppress_mem_on_mem_attention(
                 batch_size, self.num_heads, len(memory), attention_weights
             )
-
+       
         if self.std_scale is not None:
             attention_weights = attention_suppression(attention_weights, self.std_scale)
-
+       
         assert list(attention_weights.shape) == [
             batch_size * self.num_heads,
             length + 1,
@@ -315,7 +362,7 @@ class AugmentedMemoryMultiheadAttention(MultiheadAttention):
         attention_weights = torch.nn.functional.softmax(
             attention_weights.float(), dim=-1
         ).type_as(attention_weights)
-
+      
         attention_probs = self.dropout_module(attention_weights)
 
         # [T, T, B, n_head] + [T, B, n_head, d_head] -> [T, B, n_head, d_head]
@@ -332,14 +379,13 @@ class AugmentedMemoryMultiheadAttention(MultiheadAttention):
             .contiguous()
             .view(length + 1, batch_size, self.embed_dim)
         )
-
+        
         output_and_memory = self.out_proj(attention)
-
-        next_m = output_and_memory[-1:]
-        next_m = self.squash_mem(next_m)
+        
         output = output_and_memory[:-1]
-
-        state["memory_banks"].append(next_m)
+        
+        if self.max_memory_size != 0:
+            state = self.update_mem_banks(state, output_and_memory, layer_num)
 
         return output
 
@@ -384,8 +430,8 @@ class SequenceEncoder(FairseqEncoder):
     100.
     """
 
-    def __init__(self, args, module):
-        super().__init__(None)
+    def __init__(self, args, dictionary, module):
+        super().__init__(dictionary)
 
         self.module = module
         self.input_time_axis = 1
@@ -394,10 +440,17 @@ class SequenceEncoder(FairseqEncoder):
         self.left_context = args.left_context
         self.right_context = args.right_context
 
+        self.ctc_compress_out = getattr(args, "ctc_compress_out", False)
+        if self.ctc_compress_out:
+            self.ctc_fc = nn.Linear(args.encoder_embed_dim, len(dictionary))
+            assert args.criterion == "ctc_multi_loss"
+            self.ctc_compress_method = getattr(CTCCompressStrategy, args.ctc_compress_strategy)
+
     def forward(
         self,
         src_tokens: Tensor,
         src_lengths: Tensor,
+        return_all_hiddens: bool,
         states=None,
     ):
 
@@ -425,6 +478,9 @@ class SequenceEncoder(FairseqEncoder):
             segments=seg_encoder_states_lengths, time_axis=self.output_time_axis
         )
 
+        if self.ctc_compress_out:
+                encoder_out, enc_lengths = self.average_same_ctc_features(encoder_out, enc_lengths)
+
         encoder_padding_mask, _ = lengths_to_encoder_padding_mask(
             enc_lengths, batch_first=True
         )
@@ -434,9 +490,11 @@ class SequenceEncoder(FairseqEncoder):
 
         return {
             "encoder_out": [encoder_out],
-            "encoder_padding_mask": [encoder_padding_mask],
+            "encoder_padding_mask": [encoder_padding_mask]
+            if encoder_padding_mask is not None
+            else [],
             "encoder_embedding": [],
-            "encoder_states": [states],
+            "encoder_states": [[encoder_out]],
             "src_tokens": [],
             "src_lengths": [],
         }
@@ -457,7 +515,21 @@ class SequenceEncoder(FairseqEncoder):
             states=states,
         )
         return seg_encoder_states, seg_enc_lengths, states
+    
+    def average_same_ctc_features(self, x, src_lengths):
+        x_ctc = self.ctc_fc(x)
+        with torch.no_grad():
+            batch_predicted = []
+            prob_ctc = F.softmax(x_ctc, dim=-1).transpose(0, 1)  # from T x B x D to B x T x D
+            for b in range(prob_ctc.shape[0]):
+                predicted = prob_ctc[b][: src_lengths[b]].argmax(-1).tolist()
+                batch_predicted.append([(p[0], len(list(p[1]))) for p in groupby(predicted)])
 
+            new_lengths = [len(p) for p in batch_predicted]
+            weights_matrix = self.ctc_compress_method(prob_ctc, batch_predicted, new_lengths, x.dtype, x.device)
+        # x is T x B x C -> B x C x T; weights_matrix is B x T x T'
+        compressed_output = x.permute(1, 2, 0).bmm(weights_matrix)  # B x C x T'
+        return compressed_output.permute(2, 0, 1), src_lengths.new(new_lengths)
 
 # ------------------------------------------------------------------------------
 #   Augmented memory model decorator
@@ -487,6 +559,18 @@ def augmented_memory(klass):
                 type=int,
                 default=-1,
                 help="Right context for the segment.",
+            )
+            parser.add_argument(
+                "--increase-context",
+                action="store_true",
+                default=False,
+                help="if True, memory bank calculation uses left and center context",
+            )
+            parser.add_argument(
+                "--share-mem-bank-layers",
+                type=json.loads,
+                default=None,
+                help=":The list of memory bank sharing layers",
             )
 
     StreamSeq2SeqModel.__name__ = klass.__name__
