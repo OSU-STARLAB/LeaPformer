@@ -80,14 +80,20 @@ class OnlineFeatureExtractor:
         return torch.from_numpy(output)
 
     def transform(self, input):
-        if self.global_cmvn is None:
-            return input
+        if self.global_cmvn is not None:
+            mean = self.global_cmvn["mean"]
+            std = self.global_cmvn["std"]
+        
+            x = np.subtract(input, mean)
+            x = np.divide(x, std)
+        else:
+            mean = x.mean(axis=0)
+            square_sums = (x**2).sum(axis=0)
+            x = np.subtract(x, mean)
+            var = square_sums / x.shape[0] - mean**2
+            std = np.sqrt(np.maximum(var, 1e-10))
+            x = np.divide(x, std)
 
-        mean = self.global_cmvn["mean"]
-        std = self.global_cmvn["std"]
-
-        x = np.subtract(input, mean)
-        x = np.divide(x, std)
         return x
 
 
@@ -244,7 +250,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.model.eval()
         self.model.share_memory()
 
-        #print(self.model)
+        print(self.model)
 
         if self.gpu:
             self.model.cuda()
@@ -311,7 +317,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         return None
 
     def update_model_encoder(self, states):
-        #print(f"States.units.source len: {len(states.units.source)}", flush=True)
+        print(f"States.units.source len: {len(states.units.source)}", flush=True)
         if len(states.units.source) == 0:
             return
         src_indices = self.to_device(
@@ -383,7 +389,7 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         index = index[0, 0].item()
 
-        #print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
+        print(f"Incremental predicted output: {self.model.decoder.dictionary.string([index])}", flush=True)
 
         if (
             self.force_finish
@@ -423,7 +429,7 @@ class FairseqSimulSTAgent(SpeechAgent):
                     # Flush number of elements from source that have been translated by decoder
                     #print(f"Target units: {states.units.target}", flush=True)
                     flush_amount = int( 0.75 * len(states.units.target)  * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio )
-                    #print(f"Flush amount: {flush_amount}", flush=True)
+                    print(f"Flush amount: {flush_amount}", flush=True)
                     states.units.source.value = states.units.source.value[flush_amount:]
                     if len(states.units.source) >= ( 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio):
                         self.update_states_read(states)
