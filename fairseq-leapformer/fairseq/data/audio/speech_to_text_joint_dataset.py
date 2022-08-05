@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import csv
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
@@ -218,6 +219,8 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             "net_input": net_input,
             "target": s2t_out["target"],
             "target_lengths": s2t_out["target_lengths"],
+            "encoder_target": net_input["src_txt_tokens"],
+            "encoder_target_lengths": net_input["src_txt_lengths"],
             "ntokens": s2t_out["ntokens"],
             "nsentences": len(samples),
         }
@@ -248,7 +251,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         audio_paths = [(audio_root / s[cls.KEY_AUDIO]).as_posix() for s in samples]
         n_frames = [int(s[cls.KEY_N_FRAMES]) for s in samples]
         tgt_texts = [s[cls.KEY_TGT_TEXT] for s in samples]
-        src_texts = [s.get(cls.KEY_SRC_TEXT, cls.DEFAULT_SRC_TEXT) for s in samples]
+        src_texts = [s[cls.KEY_SRC_TEXT] for s in samples]
         speakers = [s.get(cls.KEY_SPEAKER, cls.DEFAULT_SPEAKER) for s in samples]
         src_langs = [s.get(cls.KEY_SRC_LANG, cls.DEFAULT_LANG) for s in samples]
         tgt_langs = [s.get(cls.KEY_TGT_LANG, cls.DEFAULT_LANG) for s in samples]
@@ -277,6 +280,46 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             alignment=tgt_alignment,
             use_src_lang_id=use_src_lang_id,
         )
+
+    @classmethod
+    def _load_samples_from_tsv(cls, root: str, split: str):
+        tsv_path = Path(root) / f"{split}.tsv"
+        if not tsv_path.is_file():
+            raise FileNotFoundError(f"Dataset not found: {tsv_path}")
+        with open(tsv_path) as f:
+            reader = csv.DictReader(
+                f,
+                delimiter="\t",
+                quotechar=None,
+                doublequote=False,
+                lineterminator="\n",
+                quoting=csv.QUOTE_NONE,
+            )
+            samples = [dict(e) for e in reader]
+        if len(samples) == 0:
+            raise ValueError(f"Empty manifest: {tsv_path}")
+
+        if "_st" in split:
+            split = split[:-2] + "asr"
+        tsv_path = Path(root) / f"{split}.tsv"
+
+        if not tsv_path.is_file():
+            raise FileNotFoundError(f"Dataset not found: {tsv_path}")
+        with open(tsv_path) as f:
+            reader = csv.DictReader(
+                f,
+                delimiter="\t",
+                quotechar=None,
+                doublequote=False,
+                lineterminator="\n",
+                quoting=csv.QUOTE_NONE,
+            )
+            for i, e in enumerate(reader):
+                samples[i]["src_text"] = e["tgt_text"]
+
+        if len(samples) == 0:
+            raise ValueError(f"Empty manifest: {tsv_path}")
+        return samples
 
     @classmethod
     def _from_tsv(

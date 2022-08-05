@@ -3,6 +3,7 @@
 import logging
 import math
 from typing import Dict, List, Optional, Tuple
+from itertools import groupby
 
 import torch
 import torch.nn as nn
@@ -165,8 +166,6 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             metavar="INT",
             help="the number of output channels of conv layer",
         )
-
-        # th-code
         parser.add_argument(
             "--share-encoder-ffn-attn-layer",
             nargs="+",
@@ -181,11 +180,25 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             metavar="INT INT",
             help=":The list of sharing layers for both feed-forward network and attention. The range of layer number starts from 1, and the layer number which is over the range would not work.",
         )
-        # th-code
+        parser.add_argument(
+            '--ctc-compress-out',  
+            action='store_true', 
+            default=False,
+            help="If set, compress the CTC output based on predictions"
+        )
+        parser.add_argument(
+            '--ctc-compress-strategy', 
+            type=str, 
+            default="avg",
+            choices=['avg', 'weighted', 'softmax'],
+            help="Strategy to use when compressing CTC output"
+        )
+
 
     @classmethod
-    def build_encoder(cls, args):
-        encoder = ConvTransformerEncoder(args)
+    def build_encoder(cls, args, task):
+        src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
+        encoder = ConvTransformerEncoder(args, src_dict if src_dict is not None else tgt_dict)
         if getattr(args, "load_pretrained_encoder_from", None):
             encoder = checkpoint_utils.load_pretrained_component_from_model(
                 component=encoder, checkpoint=args.load_pretrained_encoder_from
@@ -216,7 +229,7 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
         decoder_embed_tokens = build_embedding(
             task.target_dictionary, args.token_embed_dim # DP
         )
-        encoder = cls.build_encoder(args)
+        encoder = cls.build_encoder(args, task)
         decoder = cls.build_decoder(args, task, decoder_embed_tokens)
         return cls(encoder, decoder)
 
@@ -257,9 +270,9 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
 class ConvTransformerEncoder(FairseqEncoder):
     """Conv + Transformer encoder"""
 
-    def __init__(self, args):
+    def __init__(self, args, dictionary):
         """Construct an Encoder object."""
-        super().__init__(None)
+        super().__init__(dictionary)
 
         # DP
         self.encoder_mask_future_delay = getattr(args, "encoder_mask_future_delay", float('inf'))
@@ -320,6 +333,13 @@ class ConvTransformerEncoder(FairseqEncoder):
         else:
             self.layer_norm = None
 
+        self.ctc_compress_out = getattr(args, "ctc_compress_out", False)
+        if self.ctc_compress_out:
+            self.ctc_fc = nn.Linear(args.encoder_embed_dim, len(dictionary))
+            assert args.criterion == "ctc_multi_loss"
+            self.ctc_layer = args.ctc_encoder_layer
+            self.ctc_compress_method = getattr(CTCCompressStrategy, args.ctc_compress_strategy)
+
     def pooling_ratio(self):
         return 4
 
@@ -362,7 +382,7 @@ class ConvTransformerEncoder(FairseqEncoder):
         self._future_mask = self._future_mask.to(tensor)
         return self._future_mask[:dim, :dim]
 
-    def forward(self, src_tokens, src_lengths):
+    def forward(self, src_tokens, src_lengths, return_all_hiddens=False,):
         """Encode input sequence.
         :param torch.Tensor xs: input tensor
         :param torch.Tensor masks: input mask
@@ -390,28 +410,74 @@ class ConvTransformerEncoder(FairseqEncoder):
 
         encoder_padding_mask = lengths_to_padding_mask(input_lengths)
 
+        encoder_states = [] if return_all_hiddens else None
+
         positions = self.embed_positions(encoder_padding_mask).transpose(0, 1)
         x += positions
         x = F.dropout(x, p=self.dropout, training=self.training)
 
-        for layer in self.transformer_layers:
+        for l_idx, layer in enumerate(self.transformer_layers):
             x = layer(x=x, encoder_padding_mask=encoder_padding_mask, attn_mask=self.buffered_future_mask(x))
+            if self.ctc_compress_out and self.ctc_layer == l_idx + 1:
+                ctc_padding_mask = encoder_padding_mask
+                x_ctc, x, input_lengths = self.average_same_ctc_features(x, input_lengths)
+                encoder_padding_mask = lengths_to_padding_mask(input_lengths)
+            
+            if return_all_hiddens:
+                    assert encoder_states is not None
+                    encoder_states.append(x)
 
         if not encoder_padding_mask.any():
             maybe_encoder_padding_mask = None
         else:
             maybe_encoder_padding_mask = encoder_padding_mask
 
-        return {
-            "encoder_out": [x],
-            "encoder_padding_mask": [maybe_encoder_padding_mask]
-            if maybe_encoder_padding_mask is not None
-            else [],
-            "encoder_embedding": [],
-            "encoder_states": [],
-            "src_tokens": [],
-            "src_lengths": [],
-        }
+        if self.ctc_compress_out:
+            if not ctc_padding_mask.any():
+                maybe_ctc_padding_mask = None
+            else:
+                maybe_ctc_padding_mask = ctc_padding_mask
+                
+            return {
+                "encoder_out": [x],
+                "encoder_padding_mask": [maybe_encoder_padding_mask]
+                if maybe_encoder_padding_mask is not None
+                else [],
+                "encoder_embedding": [],
+                "encoder_states": [encoder_states],
+                "src_tokens": [],
+                "src_lengths": [],
+                "ctc_out": [x_ctc],
+                "ctc_padding_mask": [maybe_ctc_padding_mask]
+                if maybe_ctc_padding_mask is not None
+                else [],
+            }
+        else:  
+            return {
+                "encoder_out": [x],
+                "encoder_padding_mask": [maybe_encoder_padding_mask]
+                if maybe_encoder_padding_mask is not None
+                else [],
+                "encoder_embedding": [],
+                "encoder_states": [],
+                "src_tokens": [],
+                "src_lengths": [],
+            }
+
+    def average_same_ctc_features(self, x, src_lengths):
+        x_ctc = self.ctc_fc(x)
+        with torch.no_grad():
+            batch_predicted = []
+            prob_ctc = F.softmax(x_ctc, dim=-1).transpose(0, 1)  # from T x B x D to B x T x D
+            for b in range(prob_ctc.shape[0]):
+                predicted = prob_ctc[b][: src_lengths[b]].argmax(-1).tolist()
+                batch_predicted.append([(p[0], len(list(p[1]))) for p in groupby(predicted)])
+
+            new_lengths = [len(p) for p in batch_predicted]
+            weights_matrix = self.ctc_compress_method(prob_ctc, batch_predicted, new_lengths, x.dtype, x.device)
+        # x is T x B x C -> B x C x T; weights_matrix is B x T x T'
+        compressed_output = x.permute(1, 2, 0).bmm(weights_matrix)  # B x C x T'
+        return x_ctc, compressed_output.permute(2, 0, 1), src_lengths.new(new_lengths)
 
     @torch.jit.export
     def reorder_encoder_out(self, encoder_out: Dict[str, List[Tensor]], new_order):
@@ -474,6 +540,48 @@ class TransformerDecoderNoExtra(TransformerDecoder):
         )
         return x, None
 
+class CTCCompressStrategy:
+    @staticmethod
+    def avg(prob_ctc, predicted, new_lengths, dtype, device):
+        new_maxlen = max(new_lengths)
+        weights_matrix = torch.zeros((prob_ctc.shape[0], prob_ctc.shape[1], new_maxlen), dtype=dtype)
+        for b_idx, pred in enumerate(predicted):
+            processed_inputs_cnt = 0
+            for t_idx, same in enumerate(pred):
+                new_processed_inputs_cnt = processed_inputs_cnt + same[1]
+                weights_matrix[b_idx, processed_inputs_cnt:new_processed_inputs_cnt, t_idx] = 1.0 / same[1]
+                processed_inputs_cnt = new_processed_inputs_cnt
+        return weights_matrix.to(device)
+
+    @staticmethod
+    def weighted(prob_ctc, predicted, new_lengths, dtype, device):
+        new_maxlen = max(new_lengths)
+        weights_matrix = torch.zeros((prob_ctc.shape[0], prob_ctc.shape[1], new_maxlen), dtype=dtype, device=device)
+        for b_idx, pred in enumerate(predicted):
+            processed_inputs_cnt = 0
+            for t_idx, same in enumerate(pred):
+                new_processed_inputs_cnt = processed_inputs_cnt + same[1]
+                # Get the probabilities of the prediction for the different time steps as weight
+                weights = prob_ctc[b_idx, processed_inputs_cnt:new_processed_inputs_cnt, same[0]]
+                weights_matrix[b_idx, processed_inputs_cnt:new_processed_inputs_cnt, t_idx] = \
+                    weights / weights.sum()
+                processed_inputs_cnt = new_processed_inputs_cnt
+        return weights_matrix
+
+    @staticmethod
+    def softmax(prob_ctc, predicted, new_lengths, dtype, device):
+        new_maxlen = max(new_lengths)
+        weights_matrix = torch.zeros((prob_ctc.shape[0], prob_ctc.shape[1], new_maxlen), dtype=dtype, device=device)
+        for b_idx, pred in enumerate(predicted):
+            processed_inputs_cnt = 0
+            for t_idx, same in enumerate(pred):
+                new_processed_inputs_cnt = processed_inputs_cnt + same[1]
+                # Get the probabilities of the prediction for the different time steps as weight
+                weights = F.softmax(prob_ctc[b_idx, processed_inputs_cnt:new_processed_inputs_cnt, same[0]])
+                weights_matrix[b_idx, processed_inputs_cnt:new_processed_inputs_cnt, t_idx] = \
+                    weights / weights.sum()
+                processed_inputs_cnt = new_processed_inputs_cnt
+        return weights_matrix
 
 @register_model_architecture(model_name="convtransformer", arch_name="convtransformer")
 def base_architecture(args):

@@ -86,8 +86,9 @@ def convtransformer_simul_trans_espnet(args):
 @augmented_memory
 class AugmentedMemoryConvTransformerModel(SimulConvTransformerModel):
     @classmethod
-    def build_encoder(cls, args):
-        encoder = SequenceEncoder(args, AugmentedMemoryConvTransformerEncoder(args))
+    def build_encoder(cls, args, task):
+        src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
+        encoder = SequenceEncoder(args, src_dict if src_dict is not None else tgt_dict, AugmentedMemoryConvTransformerEncoder(args, src_dict if src_dict is not None else tgt_dict))
 
         if getattr(args, "load_pretrained_encoder_from", None) is not None:
             encoder = checkpoint_utils.load_pretrained_component_from_model(

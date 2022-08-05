@@ -187,7 +187,7 @@ class MonotonicAttention(MultiheadAttention):
         finish_read = monotonic_step.eq(max_steps)
         p_choose_i = torch.tensor(1)
 
-        while finish_read.sum().item() < self.num_heads:
+        while finish_read.sum().item() < self.num_heads and not (False in (max_steps > monotonic_step)):
             # p_choose: self.num_heads, src_len
             # only choose the p at monotonic steps
             # p_choose_i: self.num_heads, 1
