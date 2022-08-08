@@ -423,7 +423,12 @@ class FairseqSimulSTAgent(SpeechAgent):
                     # Flush up to last k elements of source
                     # Roughly the amount that needs to be translated if we still have additional audio to process
                     flush_amount = self.waitk_lagging * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio
-                    states.units.source.value = states.units.source.value[-flush_amount:]
+                    if flush_amount >= len(states.units.source): # Edge case, don't keep everything, instead remove first pre_decision_ratio elements to prevent stall
+                        print(f"Flush amount: {self.model.decoder.layers[0].encoder_attn.pre_decision_ratio}", flush=True)
+                        states.units.source.value = states.units.source.value[self.model.decoder.layers[0].encoder_attn.pre_decision_ratio:]
+                    else:
+                        print(f"Flush amount: {flush_amount}", flush=True)
+                        states.units.source.value = states.units.source.value[-flush_amount:]
                     self.update_states_read(states)
                 elif flush_method == 'decoder_sync':    
                     # Flush number of elements from source that have been translated by decoder
@@ -431,6 +436,7 @@ class FairseqSimulSTAgent(SpeechAgent):
                     flush_amount = int( 0.75 * len(states.units.target)  * 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio )
                     print(f"Flush amount: {flush_amount}", flush=True)
                     states.units.source.value = states.units.source.value[flush_amount:]
+
                     if len(states.units.source) >= ( 4 * self.model.decoder.layers[0].encoder_attn.pre_decision_ratio):
                         self.update_states_read(states)
                     else:
