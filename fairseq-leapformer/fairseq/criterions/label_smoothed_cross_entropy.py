@@ -60,7 +60,7 @@ class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
         sentence_avg,
         label_smoothing,
         ignore_prefix_size=0,
-        report_accuracy=False,
+        report_accuracy=True,
     ):
         super().__init__(task)
         self.sentence_avg = sentence_avg
