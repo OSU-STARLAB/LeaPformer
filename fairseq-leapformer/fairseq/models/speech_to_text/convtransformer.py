@@ -459,7 +459,7 @@ class ConvTransformerEncoder(FairseqEncoder):
                 if maybe_encoder_padding_mask is not None
                 else [],
                 "encoder_embedding": [],
-                "encoder_states": [],
+                "encoder_states": [encoder_states],
                 "src_tokens": [],
                 "src_lengths": [],
             }

@@ -76,8 +76,8 @@ def compute_ctc_uer(logprobs, targets, input_lengths, target_lengths, blank_idx)
 class CTCCriterion(FairseqCriterion):
     def __init__(self, args, task):
         super().__init__(task)
-        self.blank_idx = task.target_dictionary.index("<ctc_blank>")
-        self.pad_idx = task.target_dictionary.pad()
+        self.blank_idx = task.source_dictionary.index("<ctc_blank>")
+        self.pad_idx = task.source_dictionary.pad()
         self.task = task
 
     @staticmethod
