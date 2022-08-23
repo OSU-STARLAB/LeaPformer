@@ -141,6 +141,7 @@ class SpeechTextJointToTextTask(SpeechToTextTask):
 
         if args.criterion == "ctc_multi_loss":
             src_dict.add_symbol("<ctc_blank>")
+        
 
         print("| src dictionary: {} types".format(len(src_dict)))
         print("| tgt dictionary: {} types".format(len(tgt_dict)))
