@@ -300,7 +300,14 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             raise ValueError(f"Empty manifest: {tsv_path}")
 
         if "_st" in split:
-            split = split[:-2] + "asr"
+            # Change "st" to "asr"
+            split = split.replace("_st", "_asr")
+            # Remove tgt lang tags, if any
+            lang_tag_idx = split.find("_asr") + 4
+            if split[lang_tag_idx:].count("_") > 1:
+                cut_start = split.find("_", lang_tag_idx+1)
+                split = split[:cut_start]
+       
         tsv_path = Path(root) / f"{split}.tsv"
 
         if not tsv_path.is_file():
