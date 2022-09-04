@@ -127,7 +127,7 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             metavar="N",
             help="decoder input dimension (extra linear layer if different from decoder embed dim)",
         )
-        parser.add_argument( # DP
+        parser.add_argument( 
             "--token-embed-dim",
             type=int,
             metavar="N",
@@ -227,7 +227,7 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             return Embedding(num_embeddings, embed_dim, padding_idx)
 
         decoder_embed_tokens = build_embedding(
-            task.target_dictionary, args.token_embed_dim # DP
+            task.target_dictionary, args.token_embed_dim 
         )
         encoder = cls.build_encoder(args, task)
         decoder = cls.build_decoder(args, task, decoder_embed_tokens)
@@ -274,13 +274,8 @@ class ConvTransformerEncoder(FairseqEncoder):
         """Construct an Encoder object."""
         super().__init__(dictionary)
 
-        # DP
         self.encoder_mask_future_delay = getattr(args, "encoder_mask_future_delay", float('inf'))
-        #if self.encoder_mask_future_delay is None: 
-        #    self.encoder_mask_future_delay = float('inf')
         self.encoder_mask_block_size = getattr(args, "encoder_mask_block_size", 1)
-        #if self.encoder_mask_block_size is None:
-        #    self.encoder_mask_block_size = 1
 
         self.dropout = args.dropout
         self.embed_scale = (
@@ -353,7 +348,7 @@ class ConvTransformerEncoder(FairseqEncoder):
         mb, seq = x.size()[:2]
         return x.contiguous().view(mb, seq, -1).size(-1)
 
-    def buffered_future_mask(self, tensor): # DP
+    def buffered_future_mask(self, tensor):
         dim = tensor.size(0)
         delay = self.encoder_mask_future_delay
         block_size = self.encoder_mask_block_size
@@ -614,9 +609,9 @@ def base_architecture(args):
     args.adaptive_input = getattr(args, "adaptive_input", False)
     args.decoder_layerdrop = getattr(args, "decoder_layerdrop", 0.0)
 
-    args.token_embed_dim = getattr(args, "token_embed_dim", args.decoder_embed_dim) # DP
-    args.decoder_output_dim = getattr(args, "decoder_output_dim", args.token_embed_dim) # DP
-    args.decoder_input_dim = getattr(args, "decoder_input_dim", args.token_embed_dim) # DP
+    args.token_embed_dim = getattr(args, "token_embed_dim", args.decoder_embed_dim) 
+    args.decoder_output_dim = getattr(args, "decoder_output_dim", args.token_embed_dim) 
+    args.decoder_input_dim = getattr(args, "decoder_input_dim", args.token_embed_dim) 
     args.no_scale_embedding = getattr(args, "no_scale_embedding", False)
     args.quant_noise_pq = getattr(args, "quant_noise_pq", 0)
     args.max_source_positions = getattr(args, "max_source_positions", 3000)
