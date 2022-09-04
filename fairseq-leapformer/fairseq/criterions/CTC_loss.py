@@ -16,6 +16,14 @@ from fairseq.criterions import FairseqCriterion
 from examples.speech_recognition.data.data_utils import encoder_padding_mask_to_lengths
 from examples.speech_recognition.utils.wer_utils import Code, EditDistance, Token
 
+USE_CUDA_EDIT_DISTANCE=False
+if torch.cuda.is_available():
+    try:
+        import torch_edit_distance_cuda
+        USE_CUDA_EDIT_DISTANCE=True
+    except:
+        print("CUDA-based edit distance is not available. See fairseq/helper_scripts/pytorch-edit-distance")
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -73,6 +81,56 @@ def compute_ctc_uer(logprobs, targets, input_lengths, target_lengths, blank_idx)
 
     return batch_errors, batch_total
 
+def compute_ctc_uer_cuda(logprobs, targets, input_lengths, target_lengths, blank_idx):
+    """
+        Computes utterance error rate for CTC outputs
+
+        Args:
+            logprobs: (Torch.tensor)  N, T1, D tensor of log probabilities out
+                of the encoder
+            targets: (Torch.tensor) N, T2 tensor of targets
+            input_lengths: (Torch.tensor) lengths of inputs for each sample
+            target_lengths: (Torch.tensor) lengths of targets for each sample
+            blank_idx: (integer) id of blank symbol in target dictionary
+
+        Returns:
+            batch_errors: (float) errors in the batch
+            batch_total: (float)  total number of valid samples in batch
+    """
+    blank = torch.tensor([blank_idx, blank_idx+1], dtype=torch.int).cuda()
+    space = torch.empty([], dtype=torch.int).cuda()
+    
+    predicted_list = []
+    target_list = []
+    predicted_lengths = []
+
+    # Deduplicate & save each sentence
+    max_all = torch.argmax(logprobs, dim=-1)
+    for b in range(max_all.shape[0]):
+        predicted = max_all[b][: input_lengths[b]].type(torch.int)
+        target = targets[b][: target_lengths[b]].type(torch.int)
+
+        predicted = torch.unique_consecutive(predicted, dim=-1)
+        
+        predicted_list.append(predicted)
+        target_list.append(target)
+        predicted_lengths.append(len(predicted))
+
+    # Re-pad for batch processing
+    predicted = torch.nn.utils.rnn.pad_sequence(predicted_list, batch_first=True, padding_value=blank_idx).type(torch.int).cuda()
+    target = torch.nn.utils.rnn.pad_sequence(target_list, batch_first=True, padding_value=blank_idx).type(torch.int).cuda()
+    predicted_lengths = torch.tensor(predicted_lengths, dtype=torch.int).cuda()
+    target_lengths = target_lengths.type(torch.int).cuda()
+
+    # Calculate errors
+    distance = torch_edit_distance_cuda.levenshtein_distance(predicted, target, predicted_lengths, target_lengths, blank, space)
+    errors = distance[:, :3].sum(dim=1)
+    batch_errors = torch.sum(errors).tolist()
+    batch_total = torch.sum(target_lengths).tolist()
+    
+    return batch_errors, batch_total
+
+
 class CTCCriterion(FairseqCriterion):
     def __init__(self, args, task):
         super().__init__(task)
@@ -101,6 +159,7 @@ class CTCCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+
         net_output = model(**sample["net_input"])
         lprobs = model.get_normalized_probs(net_output, log_probs=log_probs)
 
@@ -129,9 +188,15 @@ class CTCCriterion(FairseqCriterion):
         )
 
         lprobs = lprobs.transpose(0, 1)  # T N D -> N T D
-        errors, total = compute_ctc_uer(
-            lprobs, targets, input_lengths, target_lengths, self.blank_idx
-        )
+        if USE_CUDA_EDIT_DISTANCE:
+            errors, total = compute_ctc_uer_cuda(
+                lprobs, targets, input_lengths, target_lengths, self.blank_idx
+            )
+        else:
+            errors, total = compute_ctc_uer(
+                lprobs, targets, input_lengths, target_lengths, self.blank_idx
+            )
+
 
         if self.args.sentence_avg:
             sample_size = sample["target"].size(0)
