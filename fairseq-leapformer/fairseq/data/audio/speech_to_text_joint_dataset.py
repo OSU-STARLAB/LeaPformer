@@ -251,7 +251,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         audio_paths = [(audio_root / s[cls.KEY_AUDIO]).as_posix() for s in samples]
         n_frames = [int(s[cls.KEY_N_FRAMES]) for s in samples]
         tgt_texts = [s[cls.KEY_TGT_TEXT] for s in samples]
-        src_texts = [s[cls.KEY_SRC_TEXT] for s in samples]
+        src_texts = [s.get(cls.KEY_SRC_TEXT, cls.DEFAULT_SRC_TEXT) for s in samples]
         speakers = [s.get(cls.KEY_SPEAKER, cls.DEFAULT_SPEAKER) for s in samples]
         src_langs = [s.get(cls.KEY_SRC_LANG, cls.DEFAULT_LANG) for s in samples]
         tgt_langs = [s.get(cls.KEY_TGT_LANG, cls.DEFAULT_LANG) for s in samples]
@@ -282,7 +282,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         )
 
     @classmethod
-    def _load_samples_from_tsv(cls, root: str, split: str):
+    def _load_samples_from_tsv(cls, root: str, split: str, parallel_dataset: str):
         tsv_path = Path(root) / f"{split}.tsv"
         if not tsv_path.is_file():
             raise FileNotFoundError(f"Dataset not found: {tsv_path}")
@@ -299,30 +299,24 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         if len(samples) == 0:
             raise ValueError(f"Empty manifest: {tsv_path}")
 
-        if "_st" in split:
-            # Change "st" to "asr"
-            split = split.replace("_st", "_asr")
-            # Remove tgt lang tags, if any
-            lang_tag_idx = split.find("_asr") + 4
-            if split[lang_tag_idx:].count("_") > 1:
-                cut_start = split.find("_", lang_tag_idx+1)
-                split = split[:cut_start]
-       
-        tsv_path = Path(root) / f"{split}.tsv"
+        if parallel_dataset is not None:
+            split_min = split.split("_")[0]
+            tsv_path = Path(root) / f"{split_min}_{parallel_dataset}.tsv"
+            print(f"Appending parallel dataset from {tsv_path} to SpeechToTextJointDataset", flush=True)
 
-        if not tsv_path.is_file():
-            raise FileNotFoundError(f"Dataset not found: {tsv_path}")
-        with open(tsv_path) as f:
-            reader = csv.DictReader(
-                f,
-                delimiter="\t",
-                quotechar=None,
-                doublequote=False,
-                lineterminator="\n",
-                quoting=csv.QUOTE_NONE,
-            )
-            for i, e in enumerate(reader):
-                samples[i]["src_text"] = e["tgt_text"]
+            if not tsv_path.is_file():
+                raise FileNotFoundError(f"Dataset not found: {tsv_path}")
+            with open(tsv_path) as f:
+                reader = csv.DictReader(
+                        f,
+                    delimiter="\t",
+                    quotechar=None,
+                    doublequote=False,
+                    lineterminator="\n",
+                    quoting=csv.QUOTE_NONE,
+                )
+                for i, e in enumerate(reader):
+                    samples[i]["src_text"] = e["tgt_text"]
 
         if len(samples) == 0:
             raise ValueError(f"Empty manifest: {tsv_path}")
@@ -343,8 +337,9 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         src_bpe_tokenizer,
         append_eos: bool,
         use_src_lang_id: int,
+        parallel_dataset: str,
     ) -> SpeechToTextJointDataset:
-        samples = cls._load_samples_from_tsv(root, split)
+        samples = cls._load_samples_from_tsv(root, split, parallel_dataset)
         return cls._from_list(
             split,
             is_train_split,
@@ -377,6 +372,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         seed: int,
         append_eos: Optional[bool] = True,
         use_src_lang_id: Optional[int] = 0,
+        parallel_dataset: Optional[str] = None,
     ) -> SpeechToTextJointDataset:
         datasets = [
             cls._from_tsv(
@@ -392,6 +388,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
                 src_bpe_tokenizer,
                 append_eos=append_eos,
                 use_src_lang_id=use_src_lang_id,
+                parallel_dataset=parallel_dataset,
             )
             for split in splits.split(",")
         ]

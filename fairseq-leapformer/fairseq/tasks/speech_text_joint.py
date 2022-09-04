@@ -54,6 +54,11 @@ class SpeechTextJointToTextTask(SpeechToTextTask):
             help="path to parallel text data directory",
         )
         parser.add_argument(
+            "--parallel-ctc-data",
+            default="",
+            help="path to parallel ctc data directory",
+        )
+        parser.add_argument(
             "--max-tokens-text",
             type=int,
             metavar="N",
@@ -126,6 +131,7 @@ class SpeechTextJointToTextTask(SpeechToTextTask):
         assert self.tgt_dict.pad() == self.src_dict.pad()
         assert self.tgt_dict.eos() == self.src_dict.eos()
         self.speech_only = args.load_speech_only
+        self.ctc_dataset = args.parallel_ctc_data
         self._infer_tgt_lang_id = infer_tgt_lang_id
 
     @classmethod
@@ -142,7 +148,6 @@ class SpeechTextJointToTextTask(SpeechToTextTask):
         if args.criterion == "ctc_multi_loss":
             src_dict.add_symbol("<ctc_blank>")
         
-
         print("| src dictionary: {} types".format(len(src_dict)))
         print("| tgt dictionary: {} types".format(len(tgt_dict)))
 
@@ -257,6 +262,7 @@ class SpeechTextJointToTextTask(SpeechToTextTask):
             is_train_split=is_train_split,
             epoch=epoch,
             seed=self.args.seed,
+            parallel_dataset=self.ctc_dataset if self.ctc_dataset else None,
         )
         noise_token_id = -1
         text_dataset = None
