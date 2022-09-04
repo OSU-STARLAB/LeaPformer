@@ -184,10 +184,17 @@ class MonotonicAttention(MultiheadAttention):
             p_choose.new_zeros(self.num_heads, 1).long()
         )
         assert monotonic_step is not None
+        if False in (max_steps > monotonic_step):
+            monotonic_step = torch.full((self.num_heads, 1), max_steps, device=query.device) 
         finish_read = monotonic_step.eq(max_steps)
         p_choose_i = torch.tensor(1)
+       
+        #print(f"src_len: {src_len}", flush=True)
+        #print(f"p_choose: {p_choose}", flush=True)
+        #print(f"max_steps: {max_steps}", flush=True)
+        #print(f"monotonic_step: {monotonic_step}", flush=True)
 
-        while finish_read.sum().item() < self.num_heads and not (False in (max_steps > monotonic_step)):
+        while finish_read.sum().item() < self.num_heads:
             # p_choose: self.num_heads, src_len
             # only choose the p at monotonic steps
             # p_choose_i: self.num_heads, 1
