@@ -134,9 +134,9 @@ def compute_ctc_uer_cuda(logprobs, targets, input_lengths, target_lengths, blank
 class CTCCriterion(FairseqCriterion):
     def __init__(self, args, task):
         super().__init__(task)
+        self.args = args
         self.blank_idx = task.source_dictionary.index("<ctc_blank>")
         self.pad_idx = task.source_dictionary.pad()
-        self.task = task
 
     @staticmethod
     def add_args(parser):
