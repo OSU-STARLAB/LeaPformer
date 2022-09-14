@@ -58,10 +58,8 @@ class FairseqAdaBelief(LegacyFairseqOptimizer):
             "weight_decay": self.args.weight_decay,
         }
 
-
 class AdaBelief(Optimizer):
     r"""Implements AdaBelief algorithm. Modified from Adam in PyTorch
-
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -69,13 +67,15 @@ class AdaBelief(Optimizer):
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
+            numerical stability (default: 1e-16)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decouple (boolean, optional): ( default: True) If set as True, then
+            the optimizer uses decoupled weight decay as in AdamW
+        rectify (boolean, optional): (default: True) If set as True, then perform the rectified
+            update similar to RAdam
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
-        weight_decouple (boolean, optional): ( default: False) If set as True, then
-            the optimizer uses decoupled weight decay as in AdamW
         fixed_decay (boolean, optional): (default: False) This is used when weight_decouple
             is set as True.
             When fixed_decay == True, the weight decay is performed as
@@ -83,16 +83,15 @@ class AdaBelief(Optimizer):
             When fixed_decay == False, the weight decay is performed as
             $W_{new} = W_{old} - W_{old} \times decay \times lr$. Note that in this case, the
             weight decay ratio decreases with learning rate (lr).
-        rectify (boolean, optional): (default: False) If set as True, then perform the rectified
-            update similar to RAdam
-
-    reference: AdaBelief Optimizer, adapting stepsizes by the belief in observed gradients
-               NeurIPS 2020 Spotlight
+        degenerated_to_sgd (boolean, optional) (default:True) If set as True, then perform SGD update
+            when variance of gradient is high
+    reference: AdaBelief Optimizer, adapting stepsizes by the belief in observed gradients, NeurIPS 2020
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-16,
-                 weight_decay=0, amsgrad=False, weight_decouple=True, fixed_decay=False, rectify=False,
+                 weight_decay=0, amsgrad=False, weight_decouple=True, fixed_decay=False, rectify=True,
                  degenerated_to_sgd=True):
+
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -123,7 +122,7 @@ class AdaBelief(Optimizer):
         if self.rectify:
             print('Rectification enabled in AdaBelief')
         if amsgrad:
-            print('AMS enabled in AdaBelief')
+            print('AMSGrad enabled in AdaBelief')
 
     def __setstate__(self, state):
         super(AdaBelief, self).__setstate__(state)
@@ -139,23 +138,20 @@ class AdaBelief(Optimizer):
                 # State initialization
                 state['step'] = 0
                 # Exponential moving average of gradient values
-                state['exp_avg'] = torch.zeros_like(p.data,
-                                                    memory_format=torch.preserve_format) if version_higher else torch.zeros_like(
-                    p.data)
+                state['exp_avg'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) \
+                    if version_higher else torch.zeros_like(p.data)
 
                 # Exponential moving average of squared gradient values
-                state['exp_avg_var'] = torch.zeros_like(p.data,
-                                                        memory_format=torch.preserve_format) if version_higher else torch.zeros_like(
-                    p.data)
+                state['exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) \
+                    if version_higher else torch.zeros_like(p.data)
+
                 if amsgrad:
                     # Maintains max of all exp. moving avg. of sq. grad. values
-                    state['max_exp_avg_var'] = torch.zeros_like(p.data,
-                                                                memory_format=torch.preserve_format) if version_higher else torch.zeros_like(
-                        p.data)
+                    state['max_exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) \
+                        if version_higher else torch.zeros_like(p.data)
 
     def step(self, closure=None):
         """Performs a single optimization step.
-
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
@@ -168,6 +164,14 @@ class AdaBelief(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
+                
+                # cast data type
+                half_precision = False
+                if p.data.dtype == torch.float16:
+                    half_precision = True
+                    p.data = p.data.float()
+                    p.grad = p.grad.float()
+
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError(
@@ -180,21 +184,27 @@ class AdaBelief(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['rho_inf'] = 2.0 / (1.0 - beta2) - 1.0
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data,
-                                                        memory_format=torch.preserve_format) if version_higher else torch.zeros_like(
-                        p.data)
+                    state['exp_avg'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) \
+                        if version_higher else torch.zeros_like(p.data)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_var'] = torch.zeros_like(p.data,
-                                                            memory_format=torch.preserve_format) if version_higher else torch.zeros_like(
-                        p.data)
+                    state['exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) \
+                        if version_higher else torch.zeros_like(p.data)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_var'] = torch.zeros_like(p.data,
-                                                                    memory_format=torch.preserve_format) if version_higher else torch.zeros_like(
-                            p.data)
+                        state['max_exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) \
+                            if version_higher else torch.zeros_like(p.data)
+                
+                # perform weight decay, check if decoupled weight decay
+                if self.weight_decouple:
+                    if not self.fixed_decay:
+                        p.data.mul_(1.0 - group['lr'] * group['weight_decay'])
+                    else:
+                        p.data.mul_(1.0 - group['weight_decay'])
+                else:
+                    if group['weight_decay'] != 0:
+                        grad.add_(p.data, alpha=group['weight_decay'])
 
                 # get current state variable
                 exp_avg, exp_avg_var = state['exp_avg'], state['exp_avg_var']
@@ -211,29 +221,20 @@ class AdaBelief(Optimizer):
                 if amsgrad:
                     max_exp_avg_var = state['max_exp_avg_var']
                     # Maintains the maximum of all 2nd moment running avg. till now
-                    torch.max(max_exp_avg_var, exp_avg_var, out=max_exp_avg_var)
+                    torch.max(max_exp_avg_var, exp_avg_var.add_(group['eps']), out=max_exp_avg_var)
 
                     # Use the max. for normalizing running avg. of gradient
-                    denom = (max_exp_avg_var.add_(group['eps']).sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
+                    denom = (max_exp_avg_var.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
                 else:
                     denom = (exp_avg_var.add_(group['eps']).sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
-
+                
+                # update
                 if not self.rectify:
-                    # perform weight decay, check if decoupled weight decay
-                    if self.weight_decouple:
-                        if not self.fixed_decay:
-                            p.data.mul_(1.0 - group['lr'] * group['weight_decay'])
-                        else:
-                            p.data.mul_(1.0 - group['weight_decay'])
-                    else:
-                        if group['weight_decay'] != 0:
-                            grad.add_( p.data, alpha=group['weight_decay'])
-
                     # Default update
                     step_size = group['lr'] / bias_correction1
                     p.data.addcdiv_( exp_avg, denom, value=-step_size)
 
-                else:  # Rectified update
+                else:  # Rectified update, forked from RAdam
                     buffered = group['buffer'][int(state['step'] % 10)]
                     if state['step'] == buffered[0]:
                         N_sma, step_size = buffered[1], buffered[2]
@@ -255,19 +256,14 @@ class AdaBelief(Optimizer):
                             step_size = -1
                         buffered[2] = step_size
 
-                    # more conservative since it's an approximated value
-                    p_data_fp32 = p.data#.float()
                     if N_sma >= 5:
-                        if group['weight_decay'] != 0:
-                            p_data_fp32.add_( p_data_fp32, alpha = -group['weight_decay'] * group['lr'])
                         denom = exp_avg_var.sqrt().add_(group['eps'])
-                        p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
-                        #p.data.copy_(p_data_fp32)
+                        p.data.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
                     elif step_size > 0:
-                        if group['weight_decay'] != 0:
-                            p_data_fp32.add_( p_data_fp32, alpha=-group['weight_decay'] * group['lr'])
-                        p_data_fp32.add_( exp_avg, alpha=-step_size * group['lr'])
-                        #p.data.copy_(p_data_fp32)
+                        p.data.add_( exp_avg, alpha=-step_size * group['lr'])
+                
+                if half_precision:
+                    p.data = p.data.half()
+                    p.grad = p.grad.half() 
 
         return loss
-
