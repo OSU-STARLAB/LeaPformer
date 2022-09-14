@@ -68,6 +68,24 @@ def gen_vocab(
         for _, s in sorted(vocab.items(), key=lambda x: x[0]):
             f_out.write(f"{s} 1\n")
 
+def speech_quality_acceptable(
+    waveform: torch.FloatTensor,
+    sample_rate: int,
+):
+    _waveform, _ = convert_waveform(waveform, sample_rate, to_mono=True)
+    _waveform = _waveform * (2 ** 15)  # Kaldi compliance: 16-bit signed integers
+    _waveform = _waveform.numpy()
+
+    features = _get_kaldi_fbank(_waveform, sample_rate, 80)
+    if features is None:
+        features = _get_torchaudio_fbank(_waveform, sample_rate, 80)
+    
+    ssq = np.sum(features**2, axis=1)
+    features = features[ssq > 7000]
+
+    return len(features) > 0
+
+
 
 def extract_fbank_features(
     waveform: torch.FloatTensor,
@@ -75,6 +93,8 @@ def extract_fbank_features(
     output_path: Optional[Path] = None,
     n_mel_bins: int = 80,
     overwrite: bool = False,
+    noise_gate = 0,
+    similarity_threshold = 1.0,
 ):
     if output_path is not None and output_path.is_file() and not overwrite:
         return
@@ -90,6 +110,36 @@ def extract_fbank_features(
         raise ImportError(
             "Please install pyKaldi or torchaudio to enable fbank feature extraction"
         )
+
+    #print(f"Number of timesteps: {features.shape[0]}", flush=True)
+    if noise_gate != 0:
+        ssq = np.sum(features**2, axis=1)
+        features = features[ssq > noise_gate]
+        #print(f"Timesteps remaining after noise gate: {features.shape[0]}", flush=True)
+
+    features_compressed = []
+    if similarity_threshold != 1.0:
+        for idx, current_feat in enumerate(features):
+            if idx == 0:
+                block_start_feat = current_feat
+                features_compressed.append(current_feat)
+                continue
+
+            # Start by calculating similarity with block start (either potential or known)
+            similarity = np.dot(current_feat, block_start_feat) / (np.linalg.norm(current_feat) * np.linalg.norm(block_start_feat))
+
+            # If similarity greater than threshold, this is confirmed start of block
+            # ... so no need to save current feat_step
+            if similarity >= similarity_threshold:
+                continue
+            # Else, similarity lower than threshold, so not in a block
+            # ... save current feat_step (and use as next potential block start)
+            else:
+                block_start_feat = current_feat
+                features_compressed.append(current_feat)
+        
+        features = np.vstack(features_compressed)
+        #print(f"Timesteps remaining after similarity compression: {features.shape[0]}", flush=True)
 
     if output_path is not None:
         np.save(output_path.as_posix(), features)
@@ -360,8 +410,8 @@ class S2TDataConfigWriter(object):
             time_wrap_w=0,
             freq_mask_n=2,
             freq_mask_f=10,
-            time_mask_n=5,
-            time_mask_t=50,
+            time_mask_n=10,
+            time_mask_t=16,
             time_mask_p=1.0,
         )
 

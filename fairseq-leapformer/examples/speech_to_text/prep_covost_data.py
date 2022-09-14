@@ -27,6 +27,7 @@ from examples.speech_to_text.data_utils import (
     load_df_from_tsv,
     save_df_to_tsv,
     cal_gcmvn_stats,
+    speech_quality_acceptable,
 )
 from torch import cat
 from torch import Tensor
@@ -165,13 +166,28 @@ class CoVoST(Dataset):
         data = [v for k, v in sorted(data, key=lambda x: x[0])]
         self.data = []
 
+        clips_path = self.root / "clips"
+        good_data = []
+        for e in data:
+            segment_name = e["path"]
+            full_path = clips_path / segment_name
+            try:
+                waveform, sample_rate = torchaudio.load(full_path)
+                if speech_quality_acceptable(waveform, sample_rate):
+                    good_data.append(e)
+                else:
+                    print(f"Detected audio without speech, removing value {e}", flush=True)
+            except:
+                pass
+        data = good_data
+        
         num_segments = len(data)
         print(f"Processing {num_segments} segments.", flush=True)
+
         for e in data:
             for key, lang in zip(["sentence", "translation"], [source_language, target_language]):
                 e[key] = self.edit_utterance(e[key], lang, pair_type)
 
-        clips_path = self.root / "clips"
         if (pair_type is not None) and (pair_type != "none"):
             print(f"Creating paired dataset with method: {pair_type}", flush=True)
             print(f"Creating pool with cpus: {multiprocessing.cpu_count()-1}", flush=True)
@@ -492,7 +508,7 @@ def process(args):
         for waveform, sample_rate, _, _, _, utt_id in tqdm(dataset):
             #fbank_pool.apply_async(extract_fbank_features, args=(waveform, sample_rate, feature_root / f"{utt_id}.npy"))
             features = extract_fbank_features(
-                waveform, sample_rate, feature_root / f"{utt_id}.npy"
+                waveform, sample_rate, feature_root / f"{utt_id}.npy", noise_gate=7000, similarity_threshold=0.9985,
             )
             if split == 'train' and args.cmvn_type == "global":
                 if (len(gcmvn_feature_list) < args.gcmvn_max_num) and (features is not None):
