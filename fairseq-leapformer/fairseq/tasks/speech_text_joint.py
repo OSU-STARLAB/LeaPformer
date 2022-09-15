@@ -145,7 +145,7 @@ class SpeechTextJointToTextTask(SpeechToTextTask):
         src_dict = Dictionary.load(src_dict_path.as_posix())
         tgt_dict = Dictionary.load(tgt_dict_path.as_posix())
 
-        if args.criterion == "ctc_multi_loss":
+        if "ctc_multi_loss" in args.criterion:
             src_dict.add_symbol("<ctc_blank>")
         
         print("| src dictionary: {} types".format(len(src_dict)))
