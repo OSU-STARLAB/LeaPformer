@@ -20,7 +20,8 @@ WINDOW_SIZE = 25
 SAMPLE_RATE = 16000
 FEATURE_DIM = 80
 BOW_PREFIX = "\u2581"
-
+NOISE_GATE = 7000
+SIMILARITY_THRESHOLD = 0.9985
 
 class OnlineFeatureExtractor:
     """
@@ -39,6 +40,10 @@ class OnlineFeatureExtractor:
         self.len_ms_to_samples = lambda x: x * self.sample_rate / 1000
         self.previous_residual_samples = []
         self.global_cmvn = args.global_cmvn
+
+        self.noise_gate = args.noise_gate
+        self.similarity_threshold = args.similarity_threshold
+        self.block_start_feat = None
 
     def clear_cache(self):
         self.previous_residual_samples = []
@@ -80,11 +85,41 @@ class OnlineFeatureExtractor:
         return torch.from_numpy(output)
 
     def transform(self, input):
+        x = input
+
+        if self.noise_gate > 0:
+            ssq = np.sum(x**2, axis=1)
+            x = x[ssq > self.noise_gate]
+
+        if self.similarity_threshold != 1.0:
+            features_compressed = []
+            for idx, current_feat in enumerate(x):
+                if self.block_start_feat is None:
+                    self.block_start_feat = current_feat
+                    features_compressed.append(current_feat)
+                    continue
+
+                # Start by calculating similarity with block start (either potential or known)
+                similarity = np.dot(current_feat, self.block_start_feat) / (np.linalg.norm(current_feat) * np.linalg.norm(self.block_start_feat))
+
+                # If similarity greater than threshold, this is confirmed start of block
+                # ... so no need to save current feat_step
+                if similarity >= self.similarity_threshold:
+                    continue
+                # Else, similarity lower than threshold, so not in a block
+                # ... save current feat_step (and use as next potential block start)
+                else:
+                    self.block_start_feat = current_feat
+                    features_compressed.append(current_feat)
+
+            if len(features_compressed) > 0:
+                x = np.vstack(features_compressed)
+        
         if self.global_cmvn is not None:
             mean = self.global_cmvn["mean"]
             std = self.global_cmvn["std"]
         
-            x = np.subtract(input, mean)
+            x = np.subtract(x, mean)
             x = np.divide(x, std)
         else:
             mean = x.mean(axis=0)
@@ -212,6 +247,10 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="Sample rate")
         parser.add_argument("--feature-dim", type=int, default=FEATURE_DIM,
                             help="Acoustic feature dimension.")
+        parser.add_argument("--noise-gate", type=int, default=NOISE_GATE,
+                            help="Level to use for noise gating, based on sum of squares on mfcc.")
+        parser.add_argument("--similarity-threshold", type=int, default=SIMILARITY_THRESHOLD,
+                            help="Level to use for similarity threshold, based on cosine similarity on mfcc.")
         parser.add_argument("--waitk", type=int, default=None,
                             help="Wait-k delay for evaluation")
         parser.add_argument("--flush-method", type=str, default="none",
@@ -352,6 +391,9 @@ class FairseqSimulSTAgent(SpeechAgent):
             "src": states.encoder_states["encoder_out"][0].size(0),
             "tgt": 1 + len(states.units.target),
         }
+
+        steps = states.incremental_states["steps"]
+        print(f"Incremental state steps: {steps}", flush=True)
 
         states.incremental_states["online"] = {"only": torch.tensor(not states.finish_read())}
 
