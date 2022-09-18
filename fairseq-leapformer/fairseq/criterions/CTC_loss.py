@@ -13,8 +13,6 @@ import torch
 import torch.nn.functional as F
 from fairseq import utils
 from fairseq.criterions import FairseqCriterion
-from examples.speech_recognition.data.data_utils import encoder_padding_mask_to_lengths
-from examples.speech_recognition.utils.wer_utils import Code, EditDistance, Token
 
 USE_CUDA_EDIT_DISTANCE=False
 if torch.cuda.is_available():
@@ -37,6 +35,7 @@ def arr_to_toks(arr):
 
 
 def compute_ctc_uer(logprobs, targets, input_lengths, target_lengths, blank_idx):
+    from examples.speech_recognition.utils.wer_utils import Code, EditDistance, Token
     """
         Computes utterance error rate for CTC outputs
 
@@ -159,6 +158,7 @@ class CTCCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        from examples.speech_recognition.data.data_utils import encoder_padding_mask_to_lengths
 
         net_output = model(**sample["net_input"])
         lprobs = model.get_normalized_probs(net_output, log_probs=log_probs)
