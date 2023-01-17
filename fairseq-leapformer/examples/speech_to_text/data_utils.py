@@ -314,7 +314,7 @@ def filter_manifest_df(
 
 
 def cal_gcmvn_stats(features_list):
-    features = np.concatenate(features_list)
+    features = np.concatenate(features_list).astype("float64")
     square_sums = (features ** 2).sum(axis=0)
     mean = features.mean(axis=0)
     features = np.subtract(features, mean)

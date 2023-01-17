@@ -611,7 +611,7 @@ def main():
     parser.add_argument("--cmvn-type", default="utterance",
                         choices=["global", "utterance"],
                         help="The type of cepstral mean and variance normalization")
-    parser.add_argument("--gcmvn-max-num", default=150000, type=int,
+    parser.add_argument("--gcmvn-max-num", default=50000, type=int,
                         help=(
                             "Maximum number of sentences to use to estimate"
                             "global mean and variance"
