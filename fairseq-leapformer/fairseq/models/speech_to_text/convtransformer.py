@@ -352,35 +352,6 @@ class ConvTransformerEncoder(FairseqEncoder):
         mb, seq = x.size()[:2]
         return x.contiguous().view(mb, seq, -1).size(-1)
 
-    def buffered_future_mask(self, tensor):
-        dim = tensor.size(0)
-        delay = self.encoder_mask_future_delay
-        block_size = self.encoder_mask_block_size
-
-        if (delay >= dim-1) or (block_size >= dim): # Full attention allowed, no need to check other conditions
-            self._future_mask = torch.zeros([dim, dim])
-        else: # Start with mask that disallows looking into future
-            tri_mask = torch.triu(
-                utils.fill_with_neg_inf(torch.zeros([dim, dim])), 1
-            )
-
-            # Create additional masks that consider self.encoder_mask_future_delay and self.encoder_mask_block_size
-            block_count = math.ceil(dim / block_size)
-            blocks = torch.full((block_count, block_size, block_size), 1, dtype=torch.bool)
-            block_mask = torch.nn.functional.pad(input=torch.block_diag(*blocks), pad=(0, 0, 0, 0))[:dim,:dim]            
-            delay_mask = torch.cat(
-                (
-                    torch.full((dim,delay+1), 1, dtype=torch.bool),
-                    torch.zeros( (dim,dim-(delay+1)), dtype=torch.bool)
-                ), 1
-            )
-            corr_mask = torch.logical_or(block_mask, delay_mask)
-
-            self._future_mask = tri_mask.masked_fill_(corr_mask, 0) # Apply correction
-
-        self._future_mask = self._future_mask.to(tensor)
-        return self._future_mask[:dim, :dim]
-
     def forward(self, src_tokens, src_lengths, return_all_hiddens=False,):
         """Encode input sequence.
         :param torch.Tensor xs: input tensor
@@ -417,7 +388,7 @@ class ConvTransformerEncoder(FairseqEncoder):
 
 
         for l_idx, layer in enumerate(self.transformer_layers):
-            x = layer(x=x, encoder_padding_mask=encoder_padding_mask, attn_mask=self.buffered_future_mask(x))
+            x = layer(x=x, encoder_padding_mask=encoder_padding_mask)
             if (self.ctc_layer is not None) and (self.ctc_layer == l_idx +1):
                 x_ctc = self.ctc_fc(x)
                 ctc_padding_mask = encoder_padding_mask
