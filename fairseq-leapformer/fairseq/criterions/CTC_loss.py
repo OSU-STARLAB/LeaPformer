@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from fairseq import utils
 from fairseq.criterions import FairseqCriterion
+from examples.speech_recognition.utils.wer_utils import Code, EditDistance, Token
 
 USE_CUDA_EDIT_DISTANCE=False
 if torch.cuda.is_available():
@@ -28,6 +29,7 @@ logger.setLevel(logging.DEBUG)
 
 
 def arr_to_toks(arr):
+    
     toks = []
     for a in arr:
         toks.append(Token(str(a), 0.0, 0.0))
