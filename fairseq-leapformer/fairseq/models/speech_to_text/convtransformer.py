@@ -278,9 +278,6 @@ class ConvTransformerEncoder(FairseqEncoder):
         """Construct an Encoder object."""
         super().__init__(dictionary)
 
-        self.encoder_mask_future_delay = getattr(args, "encoder_mask_future_delay", float('inf'))
-        self.encoder_mask_block_size = getattr(args, "encoder_mask_block_size", 1)
-
         self.dropout = args.dropout
         self.embed_scale = (
             1.0 if args.no_scale_embedding else math.sqrt(args.encoder_embed_dim)
