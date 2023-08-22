@@ -39,15 +39,14 @@ val_dataset = val_dataset.batch(batch_size, drop_remainder=True)
 train_dataset = tfds.load('cifar10', split='train[:90%]') # 45000
 train_dataset = train_dataset.map(decode, num_parallel_calls=AUTOTUNE) # 45000
 # print(train_dataset.cardinality().numpy())
-train_dataset = train_dataset.repeat() # -1
+train_dataset = train_dataset.repeat(2) # -1
 # print(train_dataset.cardinality().numpy())
 train_dataset = train_dataset.batch(batch_size, drop_remainder=True)
 train_dataset = train_dataset.shuffle(
     buffer_size=256, reshuffle_each_iteration=True)
 
-
-
-mapping = {"test":test_dataset, "dev": val_dataset, "train":train_dataset}
+#mapping = {"test":test_dataset, "dev": val_dataset, "train":train_dataset}
+mapping = {"train":train_dataset}
 
 for component in mapping:
     print(component)

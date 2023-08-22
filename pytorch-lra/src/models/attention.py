@@ -35,6 +35,33 @@ def attn_selector(attn_type, config, W_q=None, W_k=None, W_v=None):
     elif attn_type.startswith("skyformer"):
         from models.attention_skyformer import Skyformer
         attn = Skyformer(config)
+    elif attn_type.startswith("cosformer"):
+        from models.attention_cosformer import cosFormerAttention
+        attn = cosFormerAttention(config)
+    elif attn_type.startswith("linear"):
+        from models.attention_linear import LinearAttention
+        attn = LinearAttention(config)
+    elif attn_type.startswith("elu-linear"):
+        from models.attention_elu_linear import ELULinearAttention
+        attn = ELULinearAttention(config)
+    elif attn_type.startswith("square"):
+        from models.attention_square import SquareLinearAttention
+        attn = SquareLinearAttention(config)
+    elif attn_type.startswith("cubic"):
+        from models.attention_cubic import CubicLinearAttention
+        attn = CubicLinearAttention(config)
+    elif attn_type.startswith("softer"):
+        from models.attention_softer_softmax import SofterSoftmaxAttention
+        attn = SofterSoftmaxAttention(config)
+    elif attn_type.startswith("sinh"):
+        from models.attention_sinh import SinhLinearAttention
+        attn = SinhLinearAttention(config)
+    elif attn_type.startswith("joint-sinh"):
+        from models.attention_joint_sinh import JointSinhLinearAttention
+        attn = JointSinhLinearAttention(config)
+    elif attn_type.startswith("neg-sinh"):
+        from models.attention_neg_sinh import NegSinhLinearAttention
+        attn = NegSinhLinearAttention(config)
 
     return attn
 

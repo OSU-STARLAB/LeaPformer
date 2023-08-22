@@ -18,10 +18,7 @@ from config import Config
 from models.model_LRA import ModelForSC, ModelForSCDual
 from models.dataset_LRA import LRADataset
 
-
-
-
-
+import cProfile
 
 def print_summary(summary, save_if_improved, model, checkpoint_path):
     summary["loss"] = np.mean(summary["loss"])
@@ -155,7 +152,7 @@ def train_LRA(model, optimizer, lr_scheduler, ds_iter, amp_scaler,
             dev_accu = np.mean(summary["dev"]["accu"])
             if dev_accu > best_dev_accu:
                 best_dev_accu = dev_accu
-                if (train_step_idx + 1) > total_step * 0.2:
+                if (train_step_idx + 1) > total_step * 0.02:
                     torch.save({"model_state_dict":model.state_dict()}, checkpoint_path)
                     print('best model saved: step = ',train_step_idx, 'dev accu = ',dev_accu)
 
@@ -195,6 +192,10 @@ def get_args():
     parser.add_argument("--task", type = str, default="lra-listops",
                         help = "lra-listops, lra-retrieval, lra-text, lra-pathfinder32-curv_contour_length_14")
     parser.add_argument('--random', type=int, default=42)
+    parser.add_argument('--log-affix', type=str, default=None)
+    parser.add_argument('--pooling-mode', type=str, default=None)
+    parser.add_argument('--enable-learned-numer', action="store_true")
+    parser.add_argument('--learned-numer-inter-size', type=int, default=16)
     args = parser.parse_args()
     return args
 
@@ -216,8 +217,21 @@ def main():
 
     training_config = Config[args.task]["training"]
 
+    if args.pooling_mode is not None:
+        print(f"Here, changing to {args.pooling_mode}")
+        model_config["pooling_mode"] = args.pooling_mode
+        print(f'Here, changed to {model_config["pooling_mode"]}')
+
+    if args.log_affix is None:
+        affix = args.random
+    else:
+        affix = args.log_affix
+
+    model_config["enable_learned_numer"] = args.enable_learned_numer
+    model_config["learned_numer_inter_size"] = args.learned_numer_inter_size
+
     ### log preparation ###
-    log_dir = './log-{}/'.format(args.random)
+    log_dir = './log-{}/'.format(affix)
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
     log_dir = os.path.join(log_dir, args.task)
@@ -250,10 +264,12 @@ def main():
         model = ModelForSC(model_config)
 
 
-    checkpoint_dir = './checkpoints-{}'.format(args.random)
+    checkpoint_dir = './checkpoints-{}'.format(affix)
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
-    checkpoint_path = os.path.join(checkpoint_dir, '{}.{}.model'.format(args.checkpoint, args.random))
+    checkpoint_path = os.path.join(checkpoint_dir, '{}.{}.{}.model'.format(args.checkpoint, args.task, affix))
+    print(f"Checkpoint path: {checkpoint_path}")
+
     training_config["checkpoint_path"] = checkpoint_path
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
@@ -324,4 +340,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    cProfile.run('main()', 'restats')

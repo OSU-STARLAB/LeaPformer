@@ -3,10 +3,10 @@ from torch import nn
 from torch.nn import functional as F
 import numpy as np
 import math
-from transformers.models.big_bird.modeling_big_bird import (
+#from transformers.models.big_bird.modeling_big_bird import (
     # BigBirdBlockSparseAttention,
-    BigBirdConfig,
-)
+    #BigBirdConfig,
+#)
 
 # use in compare spectrum norm
 class BigBirdAttention(nn.Module):
