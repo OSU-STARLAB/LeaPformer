@@ -1,16 +1,12 @@
-# Skyformer
+## STAR Lab LRA Playground
 
-This repository is the official implementation of [Skyformer: Remodel Self-Attention with Gaussian Kernel and Nystr\"om Method](https://arxiv.org/abs/2111.00035) (NeurIPS 2021). 
-
-![image](/doc/Skyformer_model.jpg)
-
+PyTorch Long-Range Arena benchmark implementation lightly adapted from the one provided by Skyformer. Used for testing out efficient attention mechanisms quickly. 
 
 ## Requirements
 
 To install requirements in a conda environment:
 ```
-conda create -n skyformer python=3.6
-conda activate skyformer
+python3 -m venv pytorch_lra_venv
 pip install -r requirements.txt
 ```
 
@@ -72,6 +68,8 @@ python main.py --mode train --attn skyformer --task lra-text
 
 
 ## Reference
+
+If you use this playground to test out efficient attention mechanisms, you should cite Skyformer. The changes made to enable their implementation were extremely superficial.
 
 ```bibtex
 @inproceedings{Skyformer,
