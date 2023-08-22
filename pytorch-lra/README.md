@@ -1,19 +1,19 @@
-## STAR Lab LRA Playground
+# STAR Lab LRA Playground
 
 PyTorch Long-Range Arena benchmark implementation lightly adapted from the one provided by Skyformer. Used for testing out efficient attention mechanisms quickly. 
 
 ## Requirements
 
-To install requirements in a conda environment:
+To install requirements in a Python virtual environment on the HPCC or elsewhere:
 ```
 python3 -m venv pytorch_lra_venv
 pip install -r requirements.txt
 ```
 
-Note: Specific requirements for data preprocessing are not included here.
+Note: Specific requirements for data preprocessing are not included here. A conda-based approach would also work perfectly well. 
 
 
-# Data Preparation
+## Data Preparation
 
 Processed files can be downloaded [here](https://drive.google.com/drive/folders/1rE0SjpeFKPFtgmWWjYCoIMz91UozHWWC?usp=sharing), or processed with the following steps:
 
@@ -56,7 +56,7 @@ Note: most source code comes from [LRA repo](https://github.com/google-research/
 
 
 
-# Run 
+## Run 
 
 Modify the configuration in `config.py` and run
 ```
