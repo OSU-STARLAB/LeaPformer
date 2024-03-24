@@ -196,6 +196,9 @@ def get_args():
     parser.add_argument('--pooling-mode', type=str, default=None)
     parser.add_argument('--enable-learned-numer', action="store_true")
     parser.add_argument('--learned-numer-inter-size', type=int, default=16)
+    parser.add_argument('--model', type=str, default="transformer")
+    parser.add_argument('--d-model', type=int, default=None)
+    parser.add_argument('--num-layers', type=int, default=None)
     args = parser.parse_args()
     return args
 
@@ -215,12 +218,22 @@ def main():
     model_config["max_seq_len"] = int(2 ** math.ceil(math.log2(model_config["max_seq_len"])))
     model_config["random_seed"] = args.random
 
+    model_config["model"] = "transformer" if args.model is None else args.model
+
     training_config = Config[args.task]["training"]
 
     if args.pooling_mode is not None:
         print(f"Here, changing to {args.pooling_mode}")
         model_config["pooling_mode"] = args.pooling_mode
         print(f'Here, changed to {model_config["pooling_mode"]}')
+
+    # assumes this is only really used for S4
+    if args.d_model is not None:
+        model_config["embedding_dim"] = args.d_model
+        model_config["transformer_dim"] = args.d_model
+
+    if args.num_layers is not None:
+        model_config["num_layers"] = args.num_layers
 
     if args.log_affix is None:
         affix = args.random

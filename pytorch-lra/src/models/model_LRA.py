@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import math
 
-from models.model_transformer import Model
+from models.model_transformer import TransModel
+from models.model_S4_minimal import S4Model
 
 def pooling(inp, mode):
     if mode == "CLS":
@@ -44,7 +45,10 @@ class ModelForSC(nn.Module):
         self.pooling_mode = config["pooling_mode"]
         self.vocab_size = config["vocab_size"]
 
-        self.model = Model(config)
+        if config["model"] == "S4":
+            self.model = S4Model(config)
+        else:
+            self.model = TransModel(config)
 
         self.seq_classifer = SCHead(config)
 
@@ -89,7 +93,10 @@ class ModelForSCDual(nn.Module):
         self.pooling_mode = config["pooling_mode"]
         self.vocab_size = config["vocab_size"]
         
-        self.model = Model(config)
+        if config["model"] == "S4":
+            self.model = S4Model(config)
+        else:
+            self.model = TransModel(config)
 
         self.seq_classifer = SCHeadDual(config)
 

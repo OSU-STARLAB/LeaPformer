@@ -70,7 +70,7 @@ class cosFormerAttention(nn.Module):
         K = F.relu(K)
 
         # apply mask
-        Q = Q.masked_fill(~(mask.to(bool)[:, None, :, None]), 0)
+        #Q = Q.masked_fill(~(mask.to(bool)[:, None, :, None]), 0)
         K = K.masked_fill(~(mask.to(bool)[:, None, :, None]), 0)
 
         seq_len = Q.size(2)

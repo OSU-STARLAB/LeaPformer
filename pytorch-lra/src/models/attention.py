@@ -62,6 +62,9 @@ def attn_selector(attn_type, config, W_q=None, W_k=None, W_v=None):
     elif attn_type.startswith("neg-sinh"):
         from models.attention_neg_sinh import NegSinhLinearAttention
         attn = NegSinhLinearAttention(config)
+    elif attn_type.startswith("rope"):
+        from models.attention_rope_elu_linear import RoPEELULinearAttention
+        attn = RoPEELULinearAttention(config)
 
     return attn
 

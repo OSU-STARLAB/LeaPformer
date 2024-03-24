@@ -68,7 +68,7 @@ class TransformerLayer(nn.Module):
         X = self.mlpblock(self.norm2(X)) + X
         return X
 
-class Model(nn.Module):
+class TransModel(nn.Module):
     def __init__(self, config):
         super().__init__()
 
