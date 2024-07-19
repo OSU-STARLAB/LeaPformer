@@ -8,20 +8,18 @@ This repository is the official implementation of [Skyformer: Remodel Self-Atten
 
 ![image](/doc/Skyformer_model.jpg)
 
-
 ## Requirements
 
-To install requirements in a conda environment:
+To install requirements in a Python virtual environment on the HPCC or elsewhere:
 ```
-conda create -n skyformer python=3.6
-conda activate skyformer
+python3 -m venv pytorch_lra_venv
 pip install -r requirements.txt
 ```
 
-Note: Specific requirements for data preprocessing are not included here.
+Note: Specific requirements for data preprocessing are not included here. A conda-based approach would also work perfectly well. 
 
 
-# Data Preparation
+## Data Preparation
 
 Processed files can be downloaded [here](https://drive.google.com/drive/folders/1rE0SjpeFKPFtgmWWjYCoIMz91UozHWWC?usp=sharing), or processed with the following steps:
 
@@ -64,7 +62,7 @@ Note: most source code comes from [LRA repo](https://github.com/google-research/
 
 
 
-# Run 
+## Run 
 
 Modify the configuration in `config.py` and run
 ```
@@ -76,6 +74,8 @@ python main.py --mode train --attn skyformer --task lra-text
 
 
 ## Reference
+
+If you use this playground to test out efficient attention mechanisms, you should cite Skyformer. The changes made to enable their implementation were extremely superficial.
 
 ```bibtex
 @inproceedings{Skyformer,
