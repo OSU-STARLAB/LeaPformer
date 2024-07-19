@@ -18,37 +18,6 @@ class cosFormerAttention(nn.Module):
 
         self.drop_attn = nn.Dropout(p = config["attention_dropout"])
 
-        self.enable_learned_numer = config["enable_learned_numer"]
-        self.learned_numer_inter_size = config["learned_numer_inter_size"]
-        print(f"Learned proportions are set to {self.enable_learned_numer}")
-        if self.enable_learned_numer:
-            #self.q_numer =  nn.Linear(self.head_dim, 1, bias=False) 
-            #self.k_numer =  nn.Linear(self.head_dim, 1, bias=False) 
-
-            if self.learned_numer_inter_size == 1:
-                self.q_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, 1),
-                        nn.Sigmoid()
-                )
-                self.k_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, 1),
-                        nn.Sigmoid()
-                )
-            
-            else:
-                self.q_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, self.learned_numer_inter_size),
-                        nn.ReLU(),
-                        nn.Linear(self.learned_numer_inter_size, 1),
-                        nn.Sigmoid()
-                )
-                self.k_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, self.learned_numer_inter_size),
-                        nn.ReLU(),
-                        nn.Linear(self.learned_numer_inter_size, 1),
-                        nn.Sigmoid()
-                )
-
     def plot_props(self, prop1, prop2, bprop):
         prop1_temp = prop1[4, 0, :1024, :].repeat(1, 1024) 
         prop2_temp = prop2[4, 0, :1024, :].repeat(1, 1024)
@@ -77,33 +46,13 @@ class cosFormerAttention(nn.Module):
         idx = torch.arange(1, seq_len + 1, device=self.device)
 
         # transform query and key into expanded form
-        if self.enable_learned_numer:
-            q_num = self.q_numer(Q)
-            k_num = self.k_numer(K)
-            
-            q_sin_tr = torch.sin((math.pi / 2) * q_num)         
-            q_cos_tr = torch.cos((math.pi / 2) * q_num)
-            q_sin = torch.mul(q_sin_tr, Q)
-            q_cos = torch.mul(q_cos_tr, Q)
-            
-            #k_sin_tr = torch.sin((math.pi / 2) * (idx / seq_len))         
-            #k_cos_tr = torch.cos((math.pi / 2) * (idx / seq_len))
-            #k_sin = torch.mul(k_sin_tr, K.transpose(-2, -1))
-            #k_cos = torch.mul(k_cos_tr, K.transpose(-2, -1))
-            
-            k_sin_tr = torch.sin((math.pi / 2) * k_num)         
-            k_cos_tr = torch.cos((math.pi / 2) * k_num)
-            k_sin = torch.mul(k_sin_tr.transpose(-2, -1), K.transpose(-2, -1))
-            k_cos = torch.mul(k_cos_tr.transpose(-2, -1), K.transpose(-2, -1))
+        sin_tr = torch.sin((math.pi / 2) * (idx / seq_len))         
+        cos_tr = torch.cos((math.pi / 2) * (idx / seq_len))
+        q_sin = torch.mul(sin_tr.unsqueeze(-1), Q)
+        q_cos = torch.mul(cos_tr.unsqueeze(-1), Q)
 
-        else:
-            sin_tr = torch.sin((math.pi / 2) * (idx / seq_len))         
-            cos_tr = torch.cos((math.pi / 2) * (idx / seq_len))
-            q_sin = torch.mul(sin_tr.unsqueeze(-1), Q)
-            q_cos = torch.mul(cos_tr.unsqueeze(-1), Q)
-
-            k_sin = torch.mul(sin_tr, K.transpose(-2, -1))
-            k_cos = torch.mul(cos_tr, K.transpose(-2, -1))
+        k_sin = torch.mul(sin_tr, K.transpose(-2, -1))
+        k_cos = torch.mul(cos_tr, K.transpose(-2, -1))
 
 
         # build out d x d intermediate matrices

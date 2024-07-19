@@ -65,6 +65,9 @@ def attn_selector(attn_type, config, W_q=None, W_k=None, W_v=None):
     elif attn_type.startswith("rope"):
         from models.attention_rope_elu_linear import RoPEELULinearAttention
         attn = RoPEELULinearAttention(config)
+    elif attn_type.startswith("leapformer"):
+        from models.attention_leapformer import LeaPformerAttention
+        attn = LeaPformerAttention(confi)
 
     return attn
 

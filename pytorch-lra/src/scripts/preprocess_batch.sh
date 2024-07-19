@@ -1,34 +1,15 @@
 #!/bin/bash
 
-#SBATCH -t 3-00:00:00
-#SBATCH -J asr_training
-#SBATCH -A eecs
-#SBATCH -p dgx
-#SBATCH -c 4
-#SBATCH --gres=gpu:2
-#SBATCH --mem=120G
+cd <PATH_TO_SRC>
+source <VENV_ROOT>
 
-#SBATCH -o logs/preprocess.log
+export _PATHFINER_TFDS_PATH=<PATH_TO_TFDS>
 
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=agostinv@oregonstate.edu
-
-#module loads
-module load python3/3.8
-module load gcc/11.2
-module load cuda/11.4
-module load nccl/2.12.10
-
-#activation of environment, moving to working directory, installation of necessary libraries for environment
-cd /nfs/hpc/share/agostinv/pytorch_lra_implementation/src
-source ../../pytorch_lra_venv/bin/activate
-
-export _PATHFINER_TFDS_PATH=/nfs/hpc/share/agostinv/pytorch_lra_implementation/src/data_corrupt/lra_release/TFDS
-
+mkdir preprocess
 cd preprocess
-#python create_listops.py
-#python create_retrieval.py
-#python create_text.py
-#python create_pathfinder.py
 
+python create_listops.py
+python create_retrieval.py
+python create_text.py
+python create_pathfinder.py
 python create_cifar10.py
