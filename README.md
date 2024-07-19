@@ -18,13 +18,12 @@ TODO
 If you found our work insightful or useful, please consider citing us as:
 
 ```
-@misc{agostinelli2024leapformerenablinglineartransformers,
-      title={LeaPformer: Enabling Linear Transformers for Autoregressive and Simultaneous Tasks via Learned Proportions}, 
+@inproceedings{
+      agostinelli2024leapformer,
+      title={LeaPformer: Enabling Linear Transformers for Autoregressive and Simultaneous Tasks via Learned Proportions},
       author={Victor Agostinelli and Sanghyun Hong and Lizhong Chen},
+      booktitle={Forty-first International Conference on Machine Learning},
       year={2024},
-      eprint={2405.13046},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2405.13046}, 
+      url={https://openreview.net/forum?id=XhH1OKLANY}
 }
 ```
