@@ -1,4 +1,8 @@
-# Skyformer
+# Adapted Use
+
+This repository was adapted for validating LeaPformers. We thank the team behind Skyformers for their work on this PyTorch-based LRA implementation and we ask that anyone who uses this adapted version of the repo consider citing their work as well.
+
+## Skyformer
 
 This repository is the official implementation of [Skyformer: Remodel Self-Attention with Gaussian Kernel and Nystr\"om Method](https://arxiv.org/abs/2111.00035) (NeurIPS 2021). 
 

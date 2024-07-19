@@ -39,22 +39,23 @@ class DropoutNd(nn.Module):
 class S4DKernel(nn.Module):
     """Generate convolution kernel from diagonal SSM parameters."""
 
-    def __init__(self, d_model, N=64, dt_min=0.001, dt_max=0.1, lr=0.00001):
+    def __init__(self, d_model, channels=2, N=64, dt_min=0.001, dt_max=0.1, lr=0.00001):
         super().__init__()
         # Generate dt
         H = d_model
         self.log_dt = torch.rand(H) * (
             math.log(dt_max) - math.log(dt_min)
         ) + math.log(dt_min)
-
-        C = torch.randn(H, N // 2, dtype=torch.cfloat)
+        
+        # added bidirectionality, channels default to 2 on LRA
+        C = torch.randn(channels, H, N // 2, dtype=torch.cfloat)
         self.C = nn.Parameter(torch.view_as_real(C))
-        #self.register("log_dt", log_dt, lr)
+        self.register("log_dt", log_dt, lr)
 
         self.log_A_real = torch.log(0.5 * torch.ones(H, N//2))
         self.A_imag = math.pi * repeat(torch.arange(N//2), 'n -> h n', h=H)
-        #self.register("log_A_real", log_A_real, lr)
-        #self.register("A_imag", A_imag, lr)
+        self.register("log_A_real", log_A_real, lr)
+        self.register("A_imag", A_imag, lr)
 
     def forward(self, L):
         """
@@ -63,7 +64,7 @@ class S4DKernel(nn.Module):
 
         # Materialize parameters
         dt = torch.exp(self.log_dt) # (H)
-        C = torch.view_as_complex(self.C) # (H N)
+        C = torch.view_as_complex(self.C) # (C H N)
         A = -torch.exp(self.log_A_real) + 1j * self.A_imag # (H N)
 
         # weird device sync
@@ -75,7 +76,7 @@ class S4DKernel(nn.Module):
         dtA = A * dt.unsqueeze(-1)  # (H N)
         K = dtA.unsqueeze(-1) * torch.arange(L, device=A.device) # (H N L)
         C = C * (torch.exp(dtA)-1.) / A
-        K = 2 * torch.einsum('hn, hnl -> hl', C, torch.exp(K)).real
+        K = 2 * torch.einsum('chn, hnl -> chl', C, torch.exp(K)).real
 
         return K
 
@@ -132,9 +133,15 @@ class S4D(nn.Module):
         # Compute SSM Kernel
         k = self.kernel(L=L).to(device=u.device) # (H L)
 
+        # bidirectional logic
+        k0, k1 = rearrange(k, '(s c) h l -> s c h l', s=2)
+        k = F.pad(k0, (0, L)) \
+                + F.pad(k1.flip(-1), (L, 0))
+
         # Convolution
-        k_f = torch.fft.rfft(k, n=2*L) # (H L)
+        k_f = torch.fft.rfft(k, n=2*L) # (C H L)
         u_f = torch.fft.rfft(u, n=2*L) # (B H L)
+        y_f = torch.einsum('bhl,chl->bchl', u_f, k_f)
         y = torch.fft.irfft(u_f*k_f, n=2*L)[..., :L] # (B H L)
 
         # Compute D term in state space equation - essentially a skip connection
