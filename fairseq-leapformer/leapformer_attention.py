@@ -86,6 +86,8 @@ def leapformer_attn_train(
 
     # linearized training turned off by default, can take much longer when not using
     # a specialized implementation for causal or chunked causal attention
+    # TODO: need to add back some parallel scan behavior via einsum/cumsum for linearized
+    #       training should a user want to enable it despite memory constraint issues
     if linearized_train:
         kTv_sin = torch.bmm(k_sin.transpose(1, 2), v)
         kTv_cos = torch.bmm(k_cos.transpose(1, 2), v)

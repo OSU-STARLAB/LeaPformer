@@ -1,5 +1,5 @@
 # LeaPformer
-This repository contains the official implementation of "LeaPformer: Enabling Linear Transformers for Autoregressive and Simultaneous Tasks via Learned Proportions," the preprint for which can be found [here](https://arxiv.org/abs/2405.13046). LeaPformers are, fundamentally, a novel modification of specific re-weighting functions for linear attention mechanisms that can enable them for a wider range of tasks. Due to improved flexibility, oftentimes LeaPformers are also more accurate than alternatives with only a small amount of added latency. More details will be provided here, soon.
+This repository contains the official implementation of "LeaPformer: Enabling Linear Transformers for Autoregressive and Simultaneous Tasks via Learned Proportions," the preprint for which can be found [here](https://arxiv.org/abs/2405.13046). LeaPformers are, fundamentally, a novel modification of specific re-weighting functions for linear attention mechanisms that can enable them for a wider range of tasks. Due to improved flexibility, oftentimes LeaPformers are also more accurate than alternatives with only a small amount of added latency. 
 
 ## LeaPformers on the Long-Range Arena (LRA) Benchmark
 
@@ -21,7 +21,15 @@ We validated LeaPformers on SimulST via an older fork of Fairseq, to be provided
 
 ## What about more performant causal training/inference?
 
-As mentioned in this work, our implementations (especially causal ones) are not optimized. A number of works have demonstrated the importance of constructing hardware-aware implementations to maximize performance. Obvious next steps here would be constructing a Triton-based LeaPformer implementation (à la [Flash Linear Attention](https://github.com/sustcsonglin/flash-linear-attention)). In fact, integration with Flash Linear Attention (FLA) is likely simple, especially for applications that are just decoder-based (e.g. autoregressive language modeling), requiring transforms being applied to the query and key before calling FLA specialized kernels.
+As mentioned in this work, our implementations (especially causal ones) are not optimized. A number of works have demonstrated the importance of constructing hardware-aware implementations to maximize performance. Obvious next steps here would be constructing a Triton-based LeaPformer implementation (à la [Flash Linear Attention](https://github.com/sustcsonglin/flash-linear-attention) or FLA). In fact, integration with FLA is likely simple, especially for applications that are just decoder-based (e.g. autoregressive language modeling), requiring transforms being applied to the query and key before calling FLA specialized kernels.
+
+## Other future steps for LeaPformers?
+
+LeaPformers were originally conceived back in mid-2023, and a number of interesting works have been published since then containing elements which can be applied towards LeaPformers. For example: 
+
+1. There are no RNN-like gating mechanisms in this work, despite concurrent work like [Gated Linear Attention](https://github.com/berlino/gated_linear_attention) (GLA) using it to great effect. 
+2. Moreover, several works have skipped the time-dependent normalization term in linear attention, either favoring normalization blocks (e.g. LayerNorm or GroupNorm, seen in papers [here](https://aclanthology.org/2022.emnlp-main.473/) and [here](https://arxiv.org/abs/2307.08621)), similarly seen in GLA. In our experiments, this made no real difference but might at scale.
+3. Finally, the scale of the experiments in this work are ultimately small for modern applications, where it's very attractive to attempt to experiment at scale (i.e. around 300M+ minimum to several billion parameters).
 
 ## Reference
 
