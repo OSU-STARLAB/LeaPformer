@@ -1,6 +1,6 @@
 # Adapted Use
 
-This repository was adapted for validating LeaPformers. We thank the team behind Skyformers for their work on this PyTorch-based LRA implementation and we ask that anyone who uses this adapted version of the repo consider citing their work as well.
+This repository was adapted for validating LeaPformers. We thank the team behind Skyformers for their work on this PyTorch-based LRA implementation and we ask that anyone who uses this adapted version of the repo consider citing their work as well. Example scripts to get LeaPformers working here can be found in `src/scripts` and should require only minor modifications.
 
 ## Skyformer
 
@@ -10,7 +10,7 @@ This repository is the official implementation of [Skyformer: Remodel Self-Atten
 
 ## Requirements
 
-To install requirements in a Python virtual environment on the HPCC or elsewhere:
+To install requirements in a Python virtual environment:
 ```
 python3 -m venv pytorch_lra_venv
 pip install -r requirements.txt
@@ -75,7 +75,7 @@ python main.py --mode train --attn skyformer --task lra-text
 
 ## Reference
 
-If you use this playground to test out efficient attention mechanisms, you should cite Skyformer. The changes made to enable their implementation were extremely superficial.
+If you use this LRA implementation to test out efficient attention mechanisms, you should cite Skyformer. The changes made to enable their implementation were extremely superficial.
 
 ```bibtex
 @inproceedings{Skyformer,

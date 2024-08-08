@@ -1,6 +1,8 @@
 # LeaPformer
 This repository contains the official implementation of "LeaPformer: Enabling Linear Transformers for Autoregressive and Simultaneous Tasks via Learned Proportions," the preprint for which can be found [here](https://arxiv.org/abs/2405.13046). LeaPformers are, fundamentally, a novel modification of specific re-weighting functions for linear attention mechanisms that can enable them for a wider range of tasks. Due to improved flexibility, oftentimes LeaPformers are also more accurate than alternatives with only a small amount of added latency. 
 
+Set-up for various parts of this repo are somewhat separated, as they were occasionally validated in different environments (i.e. the environment for LRA tests was not necessarily identical to the environment for LM or SimulMT due to some compatibility issues). Instructions for set=up are provided in `pytorch-lra` and `fairseq-leapformer`.
+
 ## LeaPformers on the Long-Range Arena (LRA) Benchmark
 
 Our slightly modified version of the [Skyformer](https://arxiv.org/abs/2111.00035) PyTorch LRA benchmark can be found in `pytorch-lra,` containing several additional linear attention mechanisms compared to the original implementation. Details for running the LRA benchmark are also provided there, including some example scripts.
