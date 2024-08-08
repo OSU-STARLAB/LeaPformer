@@ -10,6 +10,16 @@
 
 --------------------------------------------------------------------------------
 
+### LeaPformer Related Content
+
+This version of fairseq is based on a private fork and a few tasks that LeaPformers were validated on were built on top of this fork. Changes related to LeaPformers can be found in a few spots:
+
+- [`leapformer-scripts`](leapformer-scripts/): contains a number of example scripts that are roughly equivalent to what was used for results in the paper.
+- [`fairseq/modules/leapformer_attention.py`](fairseq/modules/leapformer_attention.py): contains most of the LeaPformer attention implementations used for fairseq tasks.
+- [`examples/simultaneous_translation`](examples/simultaneous_translation): some in-depth changes required to ensure proper functionality for SimulST, which needs a less generic LeaPformer implementation due to some custom masking.
+
+--------------------------------------------------------------------------------
+
 Fairseq(-py) is a sequence modeling toolkit that allows researchers and
 developers to train custom models for translation, summarization, language
 modeling and other text generation tasks.
