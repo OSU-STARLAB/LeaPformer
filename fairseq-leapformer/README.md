@@ -18,6 +18,13 @@ This version of fairseq is based on a private fork and a few tasks that LeaPform
 - [`fairseq/modules/leapformer_attention.py`](fairseq/modules/leapformer_attention.py): contains most of the LeaPformer attention implementations used for fairseq tasks.
 - [`examples/simultaneous_translation`](examples/simultaneous_translation): some in-depth changes required to ensure proper functionality for SimulST, which needs a less generic LeaPformer implementation due to some custom masking.
 
+We validated this version of fairseq as functional with `Python 3.9.18`. In terms of other tools, `CUDA 11.4` and `NCCL 2.12.2` were used in a Linux-based OS (we used RHEL7 but we assume other distributions should be fine). Instructions found later in this README for generally setting up fairseq should work out of the box, but a compatible list of packages is also available under `leapformer_packages.txt` and can be installed as such before fairseq installation if necessary:
+
+```
+python -m venv fairseq-venv
+pip install -r leapformer_packages.txt
+```
+
 --------------------------------------------------------------------------------
 
 Fairseq(-py) is a sequence modeling toolkit that allows researchers and
