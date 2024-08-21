@@ -2,16 +2,16 @@
     Authored by: Victor Agostinelli, from Oregon State University 
         (also affiliated with Pacific Northwest National Laboratory)
 
-    Intended to interface with the MHA implementation in Fairseq, so this isn't
+    Intended to interface with the MHA implementation in fairseq, so this isn't
     constructed as a class or PyTorch module and is instead meant to be
     a file filled with functions. 
 
-    This also means that the MHA implementation in Fairseq needs to be augmented a 
-    bit. For example, it needs to construct the LeaP modules (provided as q_denom 
-    and k_denom).
+    This also means that the MHA implementation in fairseq needs to be augmented a 
+    bit. For example, it needs to construct the LeaP modules (provided as q_LeaP 
+    and k_LeaP).
 
     SimulMT and SimulST cross-attention is a little more involved, implementation for
-    that is grafted on the relevant example in Fairseq.
+    that is grafted on the relevant example in fairseq.
 '''
 
 import math
@@ -25,8 +25,9 @@ from fairseq import utils
 from fairseq.modules.fairseq_dropout import FairseqDropout
 
 '''
-    Generally expect Q, K, and V tensors to be in format B x N x d where...
+    Generally expect Q, K, and V tensors to be in format B x H x N x d where...
         B: batch size
+        H: number of attention heads
         N: source or target sequence length
         d: dimensionality of a given attention head, or alternatively dimensionality of model
 
@@ -35,21 +36,23 @@ from fairseq.modules.fairseq_dropout import FairseqDropout
             necessarily a performant version. Linear training should be disabled by default for causal
             attention, as replication of masking behavior almost always causes a massive memory bottleneck.
         - leapformer_attn_bidir_infer: meant for bidirectional attention with NO padding or masking.
-        - leapformer_attn_causal_infer: meant for causal attention with a Fairseq incremental_state supporting it.
+        - leapformer_attn_causal_infer: meant for causal attention with a fairseq incremental_state supporting it.
 '''
 
 def leapformer_attn_train(
     q,
     k: Optional[Tensor],
     v: Optional[Tensor],
-    num_heads: int, 
-    q_denom,
-    k_denom,
+    num_heads: int,
+    embed_dim: int, 
+    q_LeaP,
+    k_LeaP,
     out_proj,
     key_padding_mask: Optional[Tensor] = None,
     attn_mask: Optional[Tensor] = None,
     need_weights = False,
     need_head_weights = False,
+    linearized_train = False,
 ):
 
     src_len = k.size(1)
@@ -68,11 +71,11 @@ def leapformer_attn_train(
     k = F.relu(k)
 
     # application of LeaP module and re-weighting function construction
-    tgt_denoms = q_denom(q)
+    tgt_denoms = q_LeaP(q)
     sin_tr_q = torch.sin((math.pi / 2) * tgt_denoms)
     cos_tr_q = torch.cos((math.pi / 2) * tgt_denoms)
 
-    src_denoms = k_denom(k)
+    src_denoms = k_LeaP(k)
     sin_tr_k = torch.sin((math.pi / 2) * src_denoms)
     cos_tr_k = torch.cos((math.pi / 2) * src_denoms)
     
@@ -163,8 +166,9 @@ def leapformer_attn_bidir_infer(
     k: Optional[Tensor],
     v: Optional[Tensor],
     num_heads: int,
-    q_denom,
-    k_denom,
+    embed_dim: int, 
+    q_LeaP,
+    k_LeaP,
     out_proj,
     need_weights = False,
     need_head_weights = False,
@@ -179,11 +183,11 @@ def leapformer_attn_bidir_infer(
     k = F.relu(k)
 
     # application of LeaP module and construction of transforms
-    tgt_denoms = q_denom(q)
+    tgt_denoms = q_LeaP(q)
     sin_tr_q = torch.sin((math.pi / 2) * tgt_denoms)
     cos_tr_q = torch.cos((math.pi / 2) * tgt_denoms)
     
-    src_denoms = k_denom(k)
+    src_denoms = k_LeaP(k)
     sin_tr_k = torch.sin((math.pi / 2) * src_denoms)
     cos_tr_k = torch.cos((math.pi / 2) * src_denoms)
 
@@ -239,15 +243,16 @@ def leapformer_attn_causal_infer(
     k: Optional[Tensor],
     v: Optional[Tensor],
     num_heads: int,
-    q_denom,
-    k_denom,
+    embed_dim: int, 
+    q_LeaP,
+    k_LeaP,
     out_proj,
-    incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
-    simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+    incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
+    simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
     need_weights = False,
     need_head_weights = False,
     layer_idx: int = None,
-    attn_type = True,
+    self_attn = True,
 ):
     
     bsz = int(q.size(0) / num_heads)
@@ -262,18 +267,18 @@ def leapformer_attn_causal_infer(
         k = F.relu(k)
     
     # acquire old data from incremental state
-    attn_block = "attn" if attn_type else "cross_attn"
+    attn_block = "attn" if self_attn else "cross_attn"
     old_attn_weights_v_sin = simul_attn_chkpts["layers"][layer_idx][attn_block]["kTv_sin"]
     old_attn_weights_v_cos = simul_attn_chkpts["layers"][layer_idx][attn_block]["kTv_cos"]
     norm_sin_old = simul_attn_chkpts["layers"][layer_idx][attn_block]["norm_sin"]
     norm_cos_old = simul_attn_chkpts["layers"][layer_idx][attn_block]["norm_cos"]
 
     # apply LeaP module and build transforms 
-    tgt_denoms = q_denom(q)
+    tgt_denoms = q_LeaP(q)
     sin_tr_q = torch.sin((math.pi / 2) * tgt_denoms)
     cos_tr_q = torch.cos((math.pi / 2) * tgt_denoms)
     
-    src_denoms = k_denom(k)
+    src_denoms = k_LeaP(k)
     sin_tr_k = torch.sin((math.pi / 2) * src_denoms)
     cos_tr_k = torch.cos((math.pi / 2) * src_denoms)
     
@@ -300,7 +305,7 @@ def leapformer_attn_causal_infer(
 
     # build out d x d intermediate matrix
     if old_attn_weights_v_sin is not None and old_attn_weights_v_cos is not None:
-        if attention:
+        if attn_block == "attn":
             attn_weights_v_sin = old_attn_weights_v_sin + torch.bmm(k_sin.transpose(1, 2), v)
             attn_weights_v_cos = old_attn_weights_v_cos + torch.bmm(k_cos.transpose(1, 2), v)
         else:
