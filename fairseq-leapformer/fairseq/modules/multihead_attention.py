@@ -16,6 +16,12 @@ from fairseq.incremental_decoding_utils import with_incremental_state
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
 
+from fairseq.modules.leapformer_attention import (
+    leapformer_attn_train,
+    leapformer_attn_bidir_infer,
+    leapformer_attn_causal_infer
+)
+
 
 @with_incremental_state
 class MultiheadAttention(nn.Module):
@@ -38,6 +44,9 @@ class MultiheadAttention(nn.Module):
         encoder_decoder_attention=False,
         q_noise=0.0,
         qn_block_size=8,
+        leapformer_enable=False,
+        leap_factor=4,
+        linearized_train=False,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -84,6 +93,36 @@ class MultiheadAttention(nn.Module):
             self.bias_k = self.bias_v = None
 
         self.add_zero_attn = add_zero_attn
+
+        # leapformer switch and LeaP network addition to MHA
+        self.leapformer_enable = leapformer_enable
+        self.leap_factor = leap_factor
+        self.linearized_train = linearized_train
+        print(f"LeaPformer attention is enabled: {self.leapformer_enable}")
+        
+        if self.leapformer_enable:
+            print(f"LeaP step-down factor set to: {self.leap_factor}")
+            print(f"Training is linearized (NOTE: we do not recommend linearizing training " \
+                  + f"without an efficient training implementation. Out of the box, memory " \
+                  + f"consumption will explode): {self.linearized_train}")
+            
+            assert self.head_dim % self.leap_factor == 0, \
+                f"LeaP step-down factor needs to be set such that it evenly divides out the attention head dimensionality. " \
+                + f"Currently head dimensionality is {self.head_dim} and the step-down factor is {self.leap_factor}."
+
+            self.q_LeaP = nn.Sequential(
+                quant_noise(nn.Linear(self.head_dim, self.head_dim // self.leap_factor), q_noise, qn_block_size),
+                nn.ReLU(),
+                quant_noise(nn.Linear(self.head_dim // self.leap_factor, 1), q_noise, qn_block_size),
+                nn.Sigmoid()
+            )
+            self.k_LeaP = nn.Sequential(
+                quant_noise(nn.Linear(self.head_dim, self.head_dim // self.leap_factor), q_noise, qn_block_size),
+                nn.ReLU(),
+                quant_noise(nn.Linear(self.head_dim // self.leap_factor, 1), q_noise, qn_block_size),
+                nn.Sigmoid()
+            )
+
 
         self.reset_parameters()
 
@@ -246,13 +285,16 @@ class MultiheadAttention(nn.Module):
         query,
         key: Optional[Tensor],
         value: Optional[Tensor],
+        layer_idx: int,
         key_padding_mask: Optional[Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         need_weights: bool = True,
         static_kv: bool = False,
         attn_mask: Optional[Tensor] = None,
         before_softmax: bool = False,
         need_head_weights: bool = False,
+        encoder_inference_flag: bool = False,
     ) -> Tuple[Tensor, Optional[Tensor]]:
         """Input shape: Time x Batch x Channel
 
@@ -303,6 +345,11 @@ class MultiheadAttention(nn.Module):
             # Since pruning will break the dimension check and it is not easy to modify the pytorch API,
             # it is preferred to bypass the pytorch MHA when we need to skip embed_dim_check
             and not self.skip_embed_dim_check
+            # add flag to avoid efficient MHA kernel when we want to call LeaPformer
+            # NOTE: when trying to do speed tests this should be manually turned off
+            #       for a more apples-to-apples comparison with the inefficient implementation
+            #       of LeaPformer in `leapformer_attention.py`
+            and not self.leapformer_enable
         ):
             assert key is not None and value is not None
             return F.multi_head_attention_forward(
@@ -359,6 +406,8 @@ class MultiheadAttention(nn.Module):
             q = self.q_proj(query)
             k = self.k_proj(key)
             v = self.v_proj(value)
+
+        # note that scaling is usually optional for linear attention, we leave it alone here
         q *= self.scaling
 
         if self.bias_k is not None:
@@ -395,6 +444,28 @@ class MultiheadAttention(nn.Module):
                 .view(-1, bsz * self.num_heads, self.head_dim)
                 .transpose(0, 1)
             )
+
+        # covers efficiency edge-case, we don't need to recall the key and value matrices if the
+        # incremental_state and simul_attn_chkpts objects are available to use
+        if self.leapformer_enable:
+            if incremental_state is not None and simul_attn_chkpts is not None:
+                return leapformer_attn_causal_infer(
+                   q=q,
+                   k=k,
+                   v=v,
+                   num_heads=self.num_heads,
+                   embed_dim=self.embed_dim,
+                   q_LeaP=self.q_LeaP,
+                   k_LeaP=self.k_LeaP,
+                   out_proj=self.out_proj,
+                   incremental_state=incremental_state,
+                   simul_attn_chkpts=simul_attn_chkpts,
+                   need_weights=need_weights,
+                   need_head_weights=need_head_weights,
+                   layer_idx=layer_idx,
+                   self_attn=(not self.encoder_decoder_attention) 
+                )
+
 
         if saved_state is not None:
             # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
@@ -465,6 +536,53 @@ class MultiheadAttention(nn.Module):
                         ),
                     ],
                     dim=1,
+                )
+
+        '''
+        LEAPFORMER NOTE:
+
+        At this point, keys and values have been restored from the incremental state
+        we can call inefficient decoder self-attention here for leapformer and, of course,
+        cover efficient bidirectional encoder self-attention in the same call.
+
+        This is "allowed" because we are assuming that a causal query is a single token 
+        while the key and value matrices are entire sequences whose hidden representations
+        have been stored. Given that, any causality is obviously maintained.
+
+        If the fairseq incremental state doesn't exist or a given encoder inference flag
+        is set (probably needs to be done by the task), then we can safely assume we are 
+        training. 
+        '''
+        if self.leapformer_enable:
+            if incremental_state is not None or encoder_inference_flag:
+                return leapformer_attn_bidir_infer(
+                    q=q,
+                    k=k,
+                    v=v,
+                    num_heads=self.num_heads,
+                    embed_dim=self.embed_dim,
+                    q_LeaP=self.q_LeaP,
+                    k_LeaP=self.k_LeaP,
+                    need_weights=need_weights,
+                    need_head_weights=need_head_weights
+                )
+            
+            else:
+                return leapformer_attn_train(
+                    q=q,
+                    k=k,
+                    v=v,
+                    num_heads=self.num_heads,
+                    embed_dim=self.embed_dim,
+                    q_LeaP=self.q_LeaP,
+                    k_LeaP=self.k_LeaP,
+                    dropout_module=self.dropout_module,
+                    out_proj=self.out_proj,
+                    key_padding_mask=key_padding_mask,
+                    attn_mask=attn_mask,
+                    need_weights=need_weights,
+                    need_head_weights=need_head_weights,
+                    linearized_train=self.linearized_train
                 )
 
         attn_weights = torch.bmm(q, k.transpose(1, 2))

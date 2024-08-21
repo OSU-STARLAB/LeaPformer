@@ -26,5 +26,5 @@ fairseq-train ${MUSTC_ROOT}/${LANGUAGE_PAIR} \
     --encoder-normalize-before --decoder-normalize-before --share-decoder-input-output-embed \
     --attention-dropout 0.1 --activation-dropout 0.1 \
     --encoder-attention-heads 8 --decoder-attention-heads 8 \
-    --encoder-leapformer-enable \
+    --enc-leapformer-enable \
     --reset-optimizer \

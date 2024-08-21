@@ -210,6 +210,23 @@ class TransformerLanguageModelConfig(FairseqDataclass):
         default=False,
         metadata={"help": "Learn a scale coefficient for each residual connection"},
     )
+    
+    # feels a bit redundant, but there were some weird issues with ensuring the transformer config functioned
+    # added for LeaPformer
+    dec_sa_leapformer_enable: bool = field(
+        default=False,
+        metadata={"help": "Enables LeaPformer-styled attention for decoder self-attention."},
+    )
+    leap_factor: int = field(
+        default=4,
+        metadata={"help": "Step-down factor LeaP module in LeaPformer-styled attention. Needs to evenly divide attention head dimensionality."}
+    )
+    linearized_train: bool = field(
+        default=False,
+        metadata={"help": "Turns on linearized training. NOTE: this is not recommended without specialized training implementations like Flash \
+                  Linear Attention. Memory consumption will explode."}
+    )
+    
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
     tokens_per_sample: int = II("task.tokens_per_sample")

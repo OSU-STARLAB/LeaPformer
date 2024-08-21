@@ -141,6 +141,9 @@ class TransformerEncoderLayerBase(nn.Module):
             self_attention=True,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
+            leapformer_enable=cfg.enc_leapformer_enable,
+            leap_factor=cfg.leap_factor,
+            linearized_train=cfg.linearized_train
         )
 
     def residual_connection(self, x, residual):
@@ -165,6 +168,8 @@ class TransformerEncoderLayerBase(nn.Module):
         x,
         encoder_padding_mask: Optional[Tensor],
         attn_mask: Optional[Tensor] = None,
+        layer_idx: int = None,
+        encoder_inference_flag: bool = False
     ):
         """
         Args:
@@ -201,6 +206,8 @@ class TransformerEncoderLayerBase(nn.Module):
             key_padding_mask=encoder_padding_mask,
             need_weights=False,
             attn_mask=attn_mask,
+            layer_idx=layer_idx,
+            encoder_inference_flag=encoder_inference_flag
         )
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)
@@ -359,6 +366,9 @@ class TransformerDecoderLayerBase(nn.Module):
             self_attention=not cfg.cross_self_attention,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
+            leapformer_enable=cfg.dec_sa_leapformer_enable,
+            leap_factor=cfg.leap_factor,
+            linearized_train=cfg.linearized_train
         )
 
     def build_encoder_attention(self, embed_dim, cfg):
@@ -371,6 +381,9 @@ class TransformerDecoderLayerBase(nn.Module):
             encoder_decoder_attention=True,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
+            leapformer_enable=cfg.dec_ca_leapformer_enable,
+            leap_factor=cfg.leap_factor,
+            linearized_train=cfg.linearized_train
         )
 
     def prepare_for_onnx_export_(self):
@@ -391,6 +404,7 @@ class TransformerDecoderLayerBase(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        layer_idx: int = None,
     ):
         """
         Args:
@@ -454,6 +468,7 @@ class TransformerDecoderLayerBase(nn.Module):
             incremental_state=incremental_state,
             need_weights=False,
             attn_mask=self_attn_mask,
+            layer_idx=layer_idx
         )
         if self.c_attn is not None:
             tgt_len, bsz = x.size(0), x.size(1)
@@ -491,6 +506,7 @@ class TransformerDecoderLayerBase(nn.Module):
                 static_kv=True,
                 need_weights=need_attn or (not self.training and self.need_attn),
                 need_head_weights=need_head_weights,
+                layer_idx=layer_idx
             )
             x = self.dropout_module(x)
             x = self.residual_connection(x, residual)
