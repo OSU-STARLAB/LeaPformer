@@ -141,7 +141,7 @@ class TransformerEncoderLayerBase(nn.Module):
             self_attention=True,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
-            leapformer_enable=cfg.encoder_leapformer_enable,
+            leapformer_enable=cfg.enc_leapformer_enable,
             leap_factor=cfg.leap_factor,
             linearized_train=cfg.linearized_train
         )
@@ -366,7 +366,7 @@ class TransformerDecoderLayerBase(nn.Module):
             self_attention=not cfg.cross_self_attention,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
-            leapformer_enable=cfg.decoder_sa_leapformer_enable,
+            leapformer_enable=cfg.dec_sa_leapformer_enable,
             leap_factor=cfg.leap_factor,
             linearized_train=cfg.linearized_train
         )
@@ -381,7 +381,7 @@ class TransformerDecoderLayerBase(nn.Module):
             encoder_decoder_attention=True,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
-            leapformer_enable=cfg.decoder_ca_leapformer_enable,
+            leapformer_enable=cfg.dec_ca_leapformer_enable,
             leap_factor=cfg.leap_factor,
             linearized_train=cfg.linearized_train
         )

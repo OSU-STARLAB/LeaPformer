@@ -213,7 +213,7 @@ class TransformerLanguageModelConfig(FairseqDataclass):
     
     # feels a bit redundant, but there were some weird issues with ensuring the transformer config functioned
     # added for LeaPformer
-    decoder_sa_leapformer_enable: bool = field(
+    dec_sa_leapformer_enable: bool = field(
         default=False,
         metadata={"help": "Enables LeaPformer-styled attention for decoder self-attention."},
     )

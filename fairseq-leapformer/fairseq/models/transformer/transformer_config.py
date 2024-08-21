@@ -48,7 +48,7 @@ class EncDecBaseConfig(FairseqDataclass):
     layers_to_keep: Optional[List[int]] = field(
         default=None, metadata={"help": "which layers to *keep* when pruning"}
     )
-
+    
 
 @dataclass
 class DecoderConfig(EncDecBaseConfig):
@@ -232,26 +232,26 @@ class TransformerConfig(FairseqDataclass):
     )
 
     # LeaPformer configs, used for both encoders and decoders, also needs to be implemented in parsers for models 
-    encoder_leapformer_enable: bool = field(
+    enc_leapformer_enable: bool = field(
         default=False,
         metadata={"help": "Enables LeaPformer-styled attention for encoder self-attention."},
     )
-    decoder_sa_leapformer_enable: bool = field(
+    dec_sa_leapformer_enable: bool = field(
         default=False,
         metadata={"help": "Enables LeaPformer-styled attention for decoder self-attention."},
     )
-    decoder_ca_leapformer_enable: bool = field(
+    dec_ca_leapformer_enable: bool = field(
         default=False,
         metadata={"help": "Enables LeaPformer-styled attention for decoder cross-attention."},
     )
     leap_factor: int = field(
         default=4,
-        metadata={"help": "Step-down factor LeaP module in LeaPformer-styled attention. Needs to evenly divide attention head dimensionality."}
+        metadata={"help": "Step-down factor LeaP module in LeaPformer-styled attention. Needs to evenly divide attention head dimensionality."},
     )
     linearized_train: bool = field(
         default=False,
         metadata={"help": "Turns on linearized training. NOTE: this is not recommended without specialized training implementations like Flash \
-                  Linear Attention. Memory consumption will explode."}
+                  Linear Attention. Memory consumption will explode."},
     )
 
 
