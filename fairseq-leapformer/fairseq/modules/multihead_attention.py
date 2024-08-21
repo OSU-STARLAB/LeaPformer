@@ -101,14 +101,14 @@ class MultiheadAttention(nn.Module):
         print(f"LeaPformer attention is enabled: {self.leapformer_enable}")
         
         if self.leapformer_enable:
-            print(f"LeaP step-down factor set to {self.leap_factor}")
-            print(f"Training is linearized (NOTE: we do not recommend linearizing training \
-                  without an efficient training implementation. Out of the box, memory \
-                  consumption will explode): {self.linearized_train}")
+            print(f"LeaP step-down factor set to: {self.leap_factor}")
+            print(f"Training is linearized (NOTE: we do not recommend linearizing training " \
+                  + f"without an efficient training implementation. Out of the box, memory " \
+                  + f"consumption will explode): {self.linearized_train}")
             
             assert self.head_dim % self.leap_factor == 0, \
-                f"LeaP step-down factor needs to be set such that it evenly divides out the attention head dimensionality. \
-                Currently head dimensionality is {self.head_dim} and the step-down factor is {self.leap_factor}."
+                f"LeaP step-down factor needs to be set such that it evenly divides out the attention head dimensionality. " \
+                + f"Currently head dimensionality is {self.head_dim} and the step-down factor is {self.leap_factor}."
 
             self.q_LeaP = nn.Sequential(
                 quant_noise(nn.Linear(self.head_dim, self.head_dim // self.leap_factor), q_noise, qn_block_size),
@@ -576,6 +576,7 @@ class MultiheadAttention(nn.Module):
                     embed_dim=self.embed_dim,
                     q_LeaP=self.q_LeaP,
                     k_LeaP=self.k_LeaP,
+                    dropout_module=self.dropout_module,
                     out_proj=self.out_proj,
                     key_padding_mask=key_padding_mask,
                     attn_mask=attn_mask,

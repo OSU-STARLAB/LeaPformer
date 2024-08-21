@@ -51,6 +51,7 @@ def leapformer_attn_train(
     embed_dim: int, 
     q_LeaP,
     k_LeaP,
+    dropout_module,
     out_proj,
     key_padding_mask: Optional[Tensor] = None,
     attn_mask: Optional[Tensor] = None,
