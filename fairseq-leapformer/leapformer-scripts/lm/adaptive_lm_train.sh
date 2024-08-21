@@ -21,7 +21,7 @@ fairseq-train ${WIKITEXT_ROOT} \
     --warmup-updates 8000 --warmup-init-lr 1e-07 --stop-min-lr 1e-09 --optimizer nag --min-lr 0.0001 --clip-norm 0.1 \
     --criterion adaptive_loss --max-tokens 4096 --update-freq 2 --tokens-per-sample 512 --seed 1 \
     --sample-break-mode none --skip-invalid-size-inputs-valid-test --ddp-backend=legacy_ddp \
-    --dec-leapformer-enable \
+    --decoder-sa-leapformer-enable \
 
 fairseq-eval-lm ${WIKITEXT_ROOT} \
     --path ${LM_SAVE_DIR}/checkpoint_best.pt \

@@ -37,6 +37,10 @@ from fairseq.modules.fairseq_dropout import FairseqDropout
             attention, as replication of masking behavior almost always causes a massive memory bottleneck.
         - leapformer_attn_bidir_infer: meant for bidirectional attention with NO padding or masking.
         - leapformer_attn_causal_infer: meant for causal attention with a fairseq incremental_state supporting it.
+
+        NOTE: these functions can be easily adapted to test cosFormer, as the cosFormer re-weighting function is 
+              the only one that we validate LeaPformers on. q_LeaP and k_LeaP just need to be replaced by static
+              representations
 '''
 
 def leapformer_attn_train(
