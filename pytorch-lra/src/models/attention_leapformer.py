@@ -23,33 +23,31 @@ class LeaPformerAttention(nn.Module):
 
         self.learned_numer_inter_size = config["learned_inter_size"]
         
-        if self.enable_learned_numer:
-
-            # slightly hybrid, inter size of 1 produces an extremely minimal architecture
-            # but isn't expected to be used outside of checking for fundamental performance
-            if self.learned_numer_inter_size == 1:
-                self.q_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, 1),
-                        nn.Sigmoid()
-                )
-                self.k_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, 1),
-                        nn.Sigmoid()
-                )
-            
-            else:
-                self.q_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, self.learned_numer_inter_size),
-                        nn.ReLU(),
-                        nn.Linear(self.learned_numer_inter_size, 1),
-                        nn.Sigmoid()
-                )
-                self.k_numer = nn.Sequential(
-                        nn.Linear(self.head_dim, self.learned_numer_inter_size),
-                        nn.ReLU(),
-                        nn.Linear(self.learned_numer_inter_size, 1),
-                        nn.Sigmoid()
-                )
+        # slightly hybrid, inter size of 1 produces an extremely minimal architecture
+        # but isn't expected to be used outside of checking for fundamental performance
+        if self.learned_numer_inter_size == 1:
+            self.q_numer = nn.Sequential(
+                    nn.Linear(self.head_dim, 1),
+                    nn.Sigmoid()
+            )
+            self.k_numer = nn.Sequential(
+                    nn.Linear(self.head_dim, 1),
+                    nn.Sigmoid()
+            )
+        
+        else:
+            self.q_numer = nn.Sequential(
+                    nn.Linear(self.head_dim, self.learned_numer_inter_size),
+                    nn.ReLU(),
+                    nn.Linear(self.learned_numer_inter_size, 1),
+                    nn.Sigmoid()
+            )
+            self.k_numer = nn.Sequential(
+                    nn.Linear(self.head_dim, self.learned_numer_inter_size),
+                    nn.ReLU(),
+                    nn.Linear(self.learned_numer_inter_size, 1),
+                    nn.Sigmoid()
+            )
 
     def forward(self, Q, K, V, mask):
         Q = F.relu(Q)
