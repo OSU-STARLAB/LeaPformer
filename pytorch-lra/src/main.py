@@ -194,7 +194,6 @@ def get_args():
     parser.add_argument('--random', type=int, default=42)
     parser.add_argument('--log-affix', type=str, default=None)
     parser.add_argument('--pooling-mode', type=str, default=None)
-    parser.add_argument('--enable-learned-numer', action="store_true")
     parser.add_argument('--learned-numer-inter-size', type=int, default=16)
     parser.add_argument('--model', type=str, default="transformer")
     parser.add_argument('--d-model', type=int, default=None)
@@ -240,7 +239,6 @@ def main():
     else:
         affix = args.log_affix
 
-    model_config["enable_learned_numer"] = args.enable_learned_numer
     model_config["learned_numer_inter_size"] = args.learned_numer_inter_size
 
     ### log preparation ###
