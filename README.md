@@ -28,7 +28,7 @@ As mentioned in this work, our implementations (especially causal ones) are not 
 LeaPformers were originally conceived back in mid-2023, and a number of interesting works have been published since then containing elements which can be applied towards LeaPformers. For example: 
 
 1. There are no RNN-like gating mechanisms in this work, despite concurrent work like [Gated Linear Attention](https://github.com/berlino/gated_linear_attention) (GLA) using it to great effect. 
-2. Moreover, several works have skipped the time-dependent normalization term in linear attention, either favoring normalization blocks (e.g. LayerNorm or GroupNorm, seen in papers [here](https://aclanthology.org/2022.emnlp-main.473/) and [here](https://arxiv.org/abs/2307.08621)), similarly seen in GLA. In our experiments, this made no real difference but might at scale.
+2. Moreover, several works have skipped the time-dependent normalization term in linear attention, favoring normalization blocks (e.g. LayerNorm or GroupNorm, seen in papers [here](https://aclanthology.org/2022.emnlp-main.473/) and [here](https://arxiv.org/abs/2307.08621)), similarly seen in GLA. In our experiments, this made no real difference but might at scale.
 3. Finally, the scale of the experiments in this work are ultimately small for modern applications, where it's very attractive to attempt to experiment at scale (i.e. around 300M+ minimum to several billion parameters).
 
 ## Reference
