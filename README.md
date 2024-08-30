@@ -11,7 +11,7 @@ As a note, this particular set-up focuses on extremely small models, allowing fo
 
 ## LeaPformers on Autoregressive Language Modeling
 
-We validated LeaPformers on small-scale autoregressive language modeling (i.e. around 140M parameters) via an older, private fork of Fairseq, to be provided in `fairseq-leapformer` (still being cleaned up, initial implementation was ad-hoc). Scripts are available in `fairseq-leapformer/leapformer-scripts/lm` and, should one want to use a more updated version of Fairseq, it can be found [here](https://github.com/facebookresearch/fairseq).
+We validated LeaPformers on small-scale autoregressive language modeling (i.e. around 140M parameters) via an older, private fork of Fairseq, provided in `fairseq-leapformer`. Scripts are available in `fairseq-leapformer/leapformer-scripts/lm` and, should one want to use a more updated version of Fairseq, it can be found [here](https://github.com/facebookresearch/fairseq).
 
 ## LeaPformers on S2T Simultaneous Translation (SimulST)
 
