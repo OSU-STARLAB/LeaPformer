@@ -15,7 +15,7 @@ We validated LeaPformers on small-scale autoregressive language modeling (i.e. a
 
 ## LeaPformers on S2T Simultaneous Translation (SimulST)
 
-Similarly, we validated LeaPformers on SimulST on that same Fairseq fork. Unlike the autoregressive language modeling example, changes for SimulST are also placed in `fairseq-leapformer/examples/speech_to_text/simultaneous_translation/agents` and `fairseq-leapformer/examples/simultaneous_translation`, where some custom encoder-decoder masking occurs and the SimulEval agent is modified. Scripts are available in `fairseq-leapformer/leapformer-scripts/simulst`.
+Similarly, we validated LeaPformers on SimulST on that same Fairseq fork. Unlike the autoregressive language modeling example, changes for SimulST are also placed in the eval agent [here](fairseq-leapformer/examples/speech_to_text/simultaneous_translation/agents) and in custom attention formulations for SimulST [here](fairseq-leapformer/examples/simultaneous_translation), where some custom encoder-decoder masking occurs and the SimulEval agent is modified. Scripts are available in [`fairseq-leapformer/leapformer-scripts/simulst`](fairseq-leapformer/leapformer-scripts/simulst).
 
 **Cleaning up. Will be finished soon.**
 
