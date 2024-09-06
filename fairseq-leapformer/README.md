@@ -22,6 +22,7 @@ We validated this version of fairseq as functional with `Python 3.9.18`. In term
 
 ```
 python -m venv fairseq-venv
+source fairseq-venv/bin/activate
 pip install -r leapformer_packages.txt
 ```
 
