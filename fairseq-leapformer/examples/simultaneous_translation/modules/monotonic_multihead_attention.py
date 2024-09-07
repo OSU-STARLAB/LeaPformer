@@ -8,6 +8,7 @@ import math
 import torch
 from torch import Tensor
 import torch.nn as nn
+import torch.nn.functional as F
 
 from examples.simultaneous_translation.utils.p_choose_strategy import (
     learnable_p_choose,
@@ -41,6 +42,9 @@ class MonotonicAttention(MultiheadAttention):
             vdim=getattr(args, "encoder_embed_dim", None),
             dropout=args.attention_dropout,
             encoder_decoder_attention=True,
+            leapformer_enable=args.leapformer_enable,
+            leap_factor=args.leap_factor,
+            linearized_train=args.linearized_train,
         )
 
         self.soft_attention = False
@@ -93,7 +97,7 @@ class MonotonicAttention(MultiheadAttention):
         key: Tensor,
         energy_type: str,
         key_padding_mask: Optional[Tensor] = None,
-        bias: int = 0
+        bias: int = 0,
     ):
         """
         Compute energy from query and key
@@ -121,13 +125,45 @@ class MonotonicAttention(MultiheadAttention):
             .transpose(0, 1)
         )
 
-        energy = torch.bmm(q, k.transpose(1, 2)) + bias
+        # basic LeaPformer functionality won't work, we need it up until
+        # right before we multiply with the value matrix
+        if self.leapformer_enable:
+            # ReLU similarity function
+            q = F.relu(q)
+            k = F.relu(k)
+
+            # application of LeaP module and re-weighting function construction
+            tgt_denoms = self.q_LeaP(q)
+            sin_tr_q = torch.sin((math.pi / 2) * tgt_denoms)
+            cos_tr_q = torch.cos((math.pi / 2) * tgt_denoms)
+
+            src_denoms = self.k_LeaP(k)
+            sin_tr_k = torch.sin((math.pi / 2) * src_denoms)
+            cos_tr_k = torch.cos((math.pi / 2) * src_denoms)
+            
+            # query transforms, elementwise
+            q_sin = torch.mul(q, sin_tr_q)
+            q_cos = torch.mul(q, cos_tr_q)
+            
+            # key transforms, elementwise
+            k_sin = torch.mul(k, sin_tr_k)
+            k_cos = torch.mul(k, cos_tr_k)
+
+            energy = torch.bmm(q_sin, k_sin.transpose(1, 2)) + torch.bmm(q_cos, k_cos.transpose(1, 2)) + bias
+
+        else:
+            energy = torch.bmm(q, k.transpose(1, 2)) + bias
 
         if key_padding_mask is not None:
-            energy = energy.masked_fill(
-                key_padding_mask.unsqueeze(1).to(torch.bool),
-                -1e4 if energy.dtype == torch.float16 else -1e8
-            )
+            if self.leapformer_enable:
+                energy = energy.masked_fill(
+                    key_padding_mask.unsqueeze(1).to(torch.bool), 0
+                )
+            else:
+                energy = energy.masked_fill(
+                    key_padding_mask.unsqueeze(1).to(torch.bool),
+                    -1e4 if energy.dtype == torch.float16 else -1e8
+                )
 
         return energy
 
@@ -265,16 +301,24 @@ class MonotonicAttention(MultiheadAttention):
                 key,
                 "soft"
             )
-            beta = torch.nn.functional.softmax(
-                soft_energy.masked_fill(
-                    beta_mask,
-                    -1e4 if soft_energy.dtype == torch.float16 else -1e8
-                ), dim=-1
-            )
+
+            if self.leapformer_enable:
+                beta = soft_energy.masked_fill(beta_mask.to(torch.bool), 0)
+                denom = torch.clamp_min(beta.sum(dim=-1, keepdim=True), 0.1)
+                beta = beta / denom
+            else:
+                beta = torch.nn.functional.softmax(
+                    soft_energy.masked_fill(
+                        beta_mask,
+                        -1e4 if soft_energy.dtype == torch.float16 else -1e8
+                    ), dim=-1
+                )
+
             # It could happen that a head doesn't move at all
             beta = beta.masked_fill(monotonic_step.eq(0).unsqueeze(1), 0)
         else:
             # If it's hard attention just select the last state
+            # NOTE: may break with leapformer in current state of repo
             beta = alpha.view(self.num_heads, 1, src_len)  # bsz * head, tgt, src
 
         return p_choose, alpha, beta
