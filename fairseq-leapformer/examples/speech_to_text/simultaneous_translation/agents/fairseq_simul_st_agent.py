@@ -166,6 +166,10 @@ class FairseqSimulSTAgent(SpeechAgent):
         self.flush_method = args.flush_method
         print(f"Flush method set to: {self.flush_method}", flush=True)
 
+        self.leapformer_attn_enable = args.leapformer_attn_enable
+        if self.leapformer_attn_enable:
+            self.simul_attn_chkpts = {}
+
         torch.set_grad_enabled(False)
 
     def build_states(self, args, client, sentence_id):
@@ -216,6 +220,8 @@ class FairseqSimulSTAgent(SpeechAgent):
                             help="Wait-k delay for evaluation")
         parser.add_argument("--flush-method", type=str, default="none",
                             help="Method used to flush state after each sentence and enable more continuous operation.")
+        parser.add_argument("--leapformer-attn-enable", default=False, action="store_true",
+                            help="Enable Leapformer attention, assuming provided model has Leapformer attention.")
 
         # fmt: on
         return parser
@@ -264,6 +270,44 @@ class FairseqSimulSTAgent(SpeechAgent):
         states.units.source = TensorListEntry()
         states.units.target = ListEntry()
         states.incremental_states = dict()
+
+        # initialize leapformer recurrent state dictionary 
+        if self.leapformer_attn_enable:
+            model_size = len(self.model.encoder.transformer_layers) + len(self.model.decoder.layers)
+            self.simul_attn_chkpts["layers"] = {}
+            for i in range(model_size):
+                self.simul_attn_chkpts["layers"][i] = {}
+                self.simul_attn_chkpts["layers"][i]["self_attn"] = {}
+                self.simul_attn_chkpts["layers"][i]["cross_attn"] = {}
+
+                self.simul_attn_chkpts["layers"][i]["self_attn"]["norm_sin"] = None
+                self.simul_attn_chkpts["layers"][i]["self_attn"]["norm_cos"] = None
+                self.simul_attn_chkpts["layers"][i]["self_attn"]["k_sin"] = None
+                self.simul_attn_chkpts["layers"][i]["self_attn"]["k_cos"] = None
+                self.simul_attn_chkpts["layers"][i]["self_attn"]["kTv_sin"] = None
+                self.simul_attn_chkpts["layers"][i]["self_attn"]["kTv_cos"] = None
+                
+                # while we can save some cross_attn values, for simultaneous 
+                # environments it isn't actually that efficient to do so
+                # when the encoder isn't unidirectional (i.e. K and V are entirely
+                # changing at each time step versus changing progressively)
+
+                # leaving here for illustrative purposes or if unidirectional
+                # encoders are set up in the future (non-trivial due to acoustic
+                # boundaries on downsampling)
+
+                # self.simul_attn_chkpts["layers"][i]["cross_attn"]["norm_sin"] = None
+                # self.simul_attn_chkpts["layers"][i]["cross_attn"]["norm_cos"] = None
+                # self.simul_attn_chkpts["layers"][i]["cross_attn"]["k_sin"] = None
+                # self.simul_attn_chkpts["layers"][i]["cross_attn"]["k_cos"] = None
+                # self.simul_attn_chkpts["layers"][i]["cross_attn"]["kTv_sin"] = None
+                # self.simul_attn_chkpts["layers"][i]["cross_attn"]["kTv_cos"] = None
+
+            self.simul_attn_chkpts["old_indices"] = {
+                "src": 0,
+                "tgt": 0,
+            }
+
         self.past_finish_read = 0
 
     def segment_to_units(self, segment, states):
@@ -355,11 +399,24 @@ class FairseqSimulSTAgent(SpeechAgent):
 
         states.incremental_states["online"] = {"only": torch.tensor(not states.finish_read())}
 
-        x, outputs = self.model.decoder.forward(
-            prev_output_tokens=tgt_indices,
-            encoder_out=states.encoder_states,
-            incremental_state=states.incremental_states,
-        )
+        # required because of quirks with simultaneous architecture in fairseq, likely
+        # due to requirements for other inference modes (i.e. schedulers)
+        if self.leapformer_attn_enable:
+            simul_chkpts_dc = copy.deepcopy(self.simul_attn_chkpts["layers"[0]])
+            x, outputs = self.model.decoder.forward(
+                prev_output_tokens=tgt_indices,
+                encoder_out=states.encoder_states,
+                incremental_state=states.incremental_states,
+                simul_attn_chkpts=self.simul_attn_chkpts,
+            )
+            self.simul_attn_chkpts["old_indices"] = states.incremental_states["steps"]
+
+        else:
+            x, outputs = self.model.decoder.forward(
+                prev_output_tokens=tgt_indices,
+                encoder_out=states.encoder_states,
+                incremental_state=states.incremental_states,
+            )
 
         states.decoder_out = x
 
@@ -368,11 +425,19 @@ class FairseqSimulSTAgent(SpeechAgent):
         torch.cuda.empty_cache()
 
         if (outputs.action == 0) and (not states.finish_read()):
+            if self.leapformer_attn_enable:
+                self.simul_attn_chkpts["layers"][0] = simul_chkpts_dc
             return READ_ACTION
         else:
             if states.finish_read():
                 self.past_finish_read += 1
                 print(f"Past finish: {self.past_finish_read}", flush=True)
+
+                # LeaPformer NOTE: after finishing our reads (i.e. no encoder changes),
+                #                  we can finally save our key and value matrices
+                #                  for free, no additional comp. on KV states, leaving
+                #                  this here for illustrative purposes
+
             return WRITE_ACTION
 
     def predict(self, states):
