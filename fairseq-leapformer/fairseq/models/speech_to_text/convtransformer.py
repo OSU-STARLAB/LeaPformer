@@ -197,6 +197,12 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             choices=['avg', 'weighted', 'softmax'],
             help="Strategy to use when compressing CTC output"
         )
+        parser.add_argument(
+            '--enc-leapformer-enable',
+            action='store_true',
+            default=False,
+            help="Enable Leapformer attention for encoder"
+        )
 
 
     @classmethod
