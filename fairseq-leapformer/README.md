@@ -26,6 +26,9 @@ source fairseq-venv/bin/activate
 pip install -r leapformer_packages.txt
 ```
 
+> [!CAUTION]
+> A few alignment based extensions for efficient generation of SimulST masks can cause problems for certain PyTorch, CUDA, and GCC configurations in our testing. If you run into issues, downgrade PyTorch to version 1.12.1 and ensure that the correct GCC version is being employed. If problems persist, you may need to install PyTorch from source and/or set the flag `_GLIBCXX_USE_CXX11_ABI` to 0 or 1 during compilation so that it matches during the compilation of the alignment extensions needed for this fork's SimulST training.
+
 --------------------------------------------------------------------------------
 
 Fairseq(-py) is a sequence modeling toolkit that allows researchers and

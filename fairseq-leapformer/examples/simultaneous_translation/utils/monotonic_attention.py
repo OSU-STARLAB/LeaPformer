@@ -14,15 +14,23 @@ from pathlib import Path
 module_path = Path(__file__).parent.parent.parent / "operators"
 build_path = module_path / "build"
 build_path.mkdir(exist_ok=True)
+
+build_path_cuda = module_path / "build-cuda"
+build_path_cuda.mkdir(exist_ok=True)
+
+print(f"Module path for alignment loading: {module_path}")
+
 try:
     alignment_train_cpu_binding = torch.utils.cpp_extension.load(
         "alignment_train_cpu_binding",
         sources=[
             module_path / "alignment_train_cpu.cpp",
         ],
-        build_directory=build_path.as_posix()
+        build_directory=build_path.as_posix(),
+        verbose=True,
     )
 except:
+    print(f"Failed to load CPU alignment module.")
     pass
 try:
     alignment_train_cuda_binding = torch.utils.cpp_extension.load(
@@ -31,10 +39,13 @@ try:
             module_path / "alignment_train_cuda.cpp",
             module_path / "alignment_train_kernel.cu"
         ],
-        build_directory=build_path.as_posix()
+        build_directory=build_path_cuda.as_posix(),
+        verbose=True,
     )
 except:
+    print(f"Failed to load GPU alignment module.")
     pass
+
 
 def expected_alignment_from_p_choose(
     p_choose: Tensor,

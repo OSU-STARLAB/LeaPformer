@@ -384,7 +384,9 @@ class MonotonicAttention(MultiheadAttention):
         key_padding_mask: Optional[Tensor] = None,
         attn_mask: Optional[Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         need_weights: bool = True, static_kv: bool = False, need_head_weights: bool = False,
+        layer_idx: int = None,
     ):
         """
         query: tgt_len, bsz, embed_dim
