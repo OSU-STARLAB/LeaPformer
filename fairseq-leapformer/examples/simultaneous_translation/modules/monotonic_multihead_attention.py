@@ -42,7 +42,7 @@ class MonotonicAttention(MultiheadAttention):
             vdim=getattr(args, "encoder_embed_dim", None),
             dropout=args.attention_dropout,
             encoder_decoder_attention=True,
-            leapformer_enable=args.leapformer_enable,
+            leapformer_enable=args.dec_ca_leapformer_enable,
             leap_factor=args.leap_factor,
             linearized_train=args.linearized_train,
         )

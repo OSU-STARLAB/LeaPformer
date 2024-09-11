@@ -58,6 +58,7 @@ class TransformerMonotonicDecoderLayer(TransformerDecoderLayer):
         self_attn_padding_mask: Optional[Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        layer_idx: int = None,
     ):
         """
         Args:
@@ -122,6 +123,7 @@ class TransformerMonotonicDecoderLayer(TransformerDecoderLayer):
             simul_attn_chkpts=simul_attn_chkpts,
             need_weights=False,
             attn_mask=self_attn_mask,
+            layer_idx=layer_idx,
         )
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)
@@ -153,6 +155,7 @@ class TransformerMonotonicDecoderLayer(TransformerDecoderLayer):
             static_kv=True,
             need_weights=need_attn or (not self.training and self.need_attn),
             need_head_weights=need_head_weights,
+            layer_idx=layer_idx,
         )
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)

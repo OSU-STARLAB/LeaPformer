@@ -201,6 +201,7 @@ class TransformerMonotonicDecoder(TransformerDecoder):
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]],
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         full_context_alignment: bool = False,  # unused
         alignment_layer: Optional[int] = None,  # unused
         alignment_heads: Optional[int] = None,  # unsed
@@ -231,6 +232,7 @@ class TransformerMonotonicDecoder(TransformerDecoder):
                 encoder_out=encoder_outs,
                 encoder_padding_mask=encoder_padding_mask,
                 incremental_state=incremental_state,
+                simul_attn_chkpts=simul_attn_chkpts,
                 self_attn_mask=self.buffered_future_mask(x)
                 if incremental_state is None
                 else None,
