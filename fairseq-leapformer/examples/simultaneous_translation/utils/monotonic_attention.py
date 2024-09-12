@@ -14,15 +14,23 @@ from pathlib import Path
 module_path = Path(__file__).parent.parent.parent / "operators"
 build_path = module_path / "build"
 build_path.mkdir(exist_ok=True)
+
+build_path_cuda = module_path / "build-cuda"
+build_path_cuda.mkdir(exist_ok=True)
+
+print(f"Module path for alignment loading: {module_path}")
+
 try:
     alignment_train_cpu_binding = torch.utils.cpp_extension.load(
         "alignment_train_cpu_binding",
         sources=[
             module_path / "alignment_train_cpu.cpp",
         ],
-        build_directory=build_path.as_posix()
+        build_directory=build_path.as_posix(),
+        verbose=True,
     )
 except:
+    print(f"Failed to load CPU alignment module.")
     pass
 try:
     alignment_train_cuda_binding = torch.utils.cpp_extension.load(
@@ -31,10 +39,13 @@ try:
             module_path / "alignment_train_cuda.cpp",
             module_path / "alignment_train_kernel.cu"
         ],
-        build_directory=build_path.as_posix()
+        build_directory=build_path_cuda.as_posix(),
+        verbose=True,
     )
 except:
+    print(f"Failed to load GPU alignment module.")
     pass
+
 
 def expected_alignment_from_p_choose(
     p_choose: Tensor,
@@ -94,7 +105,8 @@ def expected_soft_attention(
     soft_energy: Tensor,
     padding_mask: Optional[Tensor] = None,
     chunk_size: Optional[int] = None,
-    eps: float = 1e-10
+    eps: float = 1e-10,
+    leapformer_enable = False,
 ):
     """
     Function to compute expected soft attention for
@@ -115,10 +127,16 @@ def expected_soft_attention(
     """
     if padding_mask is not None:
         alpha = alpha.masked_fill(padding_mask.unsqueeze(1), 0.0)
-        soft_energy = soft_energy.masked_fill(
-            padding_mask.unsqueeze(1),
-            -1e4 if soft_energy.dtype == torch.float16 else -1e8
-        )
+
+        if leapformer_enable:
+            soft_energy = soft_energy.masked_fill(
+                padding_mask.unsqueeze(1), 0
+            )
+        else:
+            soft_energy = soft_energy.masked_fill(
+                padding_mask.unsqueeze(1),
+                -1e4 if soft_energy.dtype == torch.float16 else -1e8
+            )
 
     prob_check(alpha)
 
@@ -130,26 +148,35 @@ def expected_soft_attention(
     soft_energy = soft_energy - soft_energy.max(dim=2, keepdim=True)[0]
     exp_soft_energy = torch.exp(soft_energy) + eps
 
-    if chunk_size is not None:
-        # Chunkwise
-        beta = (
-            exp_soft_energy
-            * moving_sum(
-                alpha / (eps + moving_sum(exp_soft_energy, chunk_size, 1)),
-                1, chunk_size
-            )
-        )
-    else:
-        # Infinite lookback
-        # Notice that infinite lookback is a special case of chunkwise
-        # where chunksize = inf
-        inner_items = alpha / (eps + torch.cumsum(exp_soft_energy, dim=2))
+    if leapformer_enable:
+        inner_items = alpha / (torch.cumsum(torch.clamp_min(soft_energy, 1e-6), dim=2))
 
         beta = (
-            exp_soft_energy
+            soft_energy
             * torch.cumsum(inner_items.flip(dims=[2]), dim=2)
             .flip(dims=[2])
         )
+    else:
+        if chunk_size is not None:
+            # Chunkwise
+            beta = (
+                exp_soft_energy
+                * moving_sum(
+                    alpha / (eps + moving_sum(exp_soft_energy, chunk_size, 1)),
+                    1, chunk_size
+                )
+            )
+        else:
+            # Infinite lookback
+            # Notice that infinite lookback is a special case of chunkwise
+            # where chunksize = inf
+            inner_items = alpha / (eps + torch.cumsum(exp_soft_energy, dim=2))
+
+            beta = (
+                exp_soft_energy
+                * torch.cumsum(inner_items.flip(dims=[2]), dim=2)
+                .flip(dims=[2])
+            )
 
     if padding_mask is not None:
         beta = beta.masked_fill(

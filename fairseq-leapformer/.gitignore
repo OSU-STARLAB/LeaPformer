@@ -16,6 +16,7 @@ __pycache__/
 .Python
 env/
 build/
+build-cuda/
 develop-eggs/
 dist/
 downloads/
@@ -134,3 +135,6 @@ experimental/*
 
 # Weights and Biases logs
 wandb/
+
+# LeaPformer
+fairseq-venv/

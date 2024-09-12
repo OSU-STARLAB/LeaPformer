@@ -51,12 +51,14 @@ class TransformerMonotonicDecoderLayer(TransformerDecoderLayer):
         encoder_out: Optional[Tensor] = None,
         encoder_padding_mask: Optional[Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         prev_self_attn_state: Optional[List[Tensor]] = None,
         prev_attn_state: Optional[List[Tensor]] = None,
         self_attn_mask: Optional[Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        layer_idx: int = None,
     ):
         """
         Args:
@@ -118,8 +120,10 @@ class TransformerMonotonicDecoderLayer(TransformerDecoderLayer):
             value=y,
             key_padding_mask=self_attn_padding_mask,
             incremental_state=incremental_state,
+            simul_attn_chkpts=simul_attn_chkpts,
             need_weights=False,
             attn_mask=self_attn_mask,
+            layer_idx=layer_idx,
         )
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)
@@ -147,9 +151,11 @@ class TransformerMonotonicDecoderLayer(TransformerDecoderLayer):
             value=encoder_out,
             key_padding_mask=encoder_padding_mask,
             incremental_state=incremental_state,
+            simul_attn_chkpts=simul_attn_chkpts,
             static_kv=True,
             need_weights=need_attn or (not self.training and self.need_attn),
             need_head_weights=need_head_weights,
+            layer_idx=layer_idx,
         )
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)

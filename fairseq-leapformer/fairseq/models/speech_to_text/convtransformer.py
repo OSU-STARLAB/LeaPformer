@@ -197,6 +197,37 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
             choices=['avg', 'weighted', 'softmax'],
             help="Strategy to use when compressing CTC output"
         )
+        parser.add_argument(
+            '--enc-leapformer-enable',
+            action='store_true',
+            default=False,
+            help="Enable Leapformer attention for encoder"
+        )
+        parser.add_argument(
+            '--dec-sa-leapformer-enable',
+            action='store_true',
+            default=False,
+            help="Enable Leapformer attention for decoder self-attention"
+        )
+        parser.add_argument(
+            '--dec-ca-leapformer-enable',
+            action='store_true',
+            default=False,
+            help="Enable Leapformer attention for decoder cross-attention"
+        )
+        parser.add_argument(
+            "--leap-factor",
+            type=int,
+            default=4,
+            metavar="INT",
+            help="LeaP step-down factor for LeaPformer attention"
+        )
+        parser.add_argument(
+            '--linearized-train',
+            action='store_true',
+            default=False,
+            help="Enable linearized training for LeaPformer attention, not recommended without custom kernels"
+        )
 
 
     @classmethod
