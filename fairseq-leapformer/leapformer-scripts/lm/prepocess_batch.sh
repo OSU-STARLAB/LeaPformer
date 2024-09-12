@@ -12,6 +12,11 @@ source ${VENV_ROOT}/bin/activate
 # added due to issues on our end with scoping in fairseq, can probably be removed
 export PYTHONPATH='${PYTHONPATH}:.'
 
+# automatically handle grabbing and tokenizing wikitext-103
+cd ${FAIRSEQ_ROOT}/examples/language_model/
+bash prepare-wikitext-103.sh
+cd ../..
+
 fairseq-preprocess \
     --only-source \
     --trainpref ${WIKITEXT_SRC}/wiki.train.tokens \
