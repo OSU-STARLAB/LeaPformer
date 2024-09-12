@@ -12,9 +12,12 @@ export MUSTC_ROOT=<PATH_TO_MUSTC_DATA>
 # workaround for edge case issue with fairseq
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 
+# activation of environment, moving to working directory
 cd ${FAIRSEQ_ROOT}
 source ${VENV_ROOT}/bin/activate
 
+# added due to issues on our end with scoping in fairseq, can probably be removed
+export PYTHONPATH='${PYTHONPATH}:.'
 
 # assumes that tar ball of MuST-C data is already placed where it should be and unzipped
 # we are assuming en-de as the language pair of interest, CoVoST is fr-en
