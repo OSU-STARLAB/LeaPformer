@@ -13,4 +13,4 @@ Preprocessing => ASR Pretraining => SimulST Training => Eval Data Split => Eval
 By default, all training scripts are configured to replace all attention blocks with equivalent LeaPformer blocks. Disabling this replacement for a given block is as simple as removing its flag (marked pretty literally, e.g. `--enc-leapformer-enable` of course corresponds to encoder self-attention).
 
 > [!WARNING]  
-> You should not change encoder changes when loading a checkpoint after ASR pretraining. This can result in sub-par model performance, poorer convergence, and generally unintended results.
+> You should not change encoder settings when loading a checkpoint after ASR pretraining. This can result in sub-par model performance, poorer convergence, and generally unintended results.
