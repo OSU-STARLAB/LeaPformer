@@ -27,6 +27,7 @@ fairseq-train ${MUSTC_ROOT}/${LANGUAGE_PAIR} \
     --max-update 100000 --seed 2 --ddp-backend legacy_ddp --log-interval 50 \
     --encoder-normalize-before --decoder-normalize-before --share-decoder-input-output-embed \
     --encoder-attention-heads 8 --decoder-attention-heads 8 \
+    --leap-factor 4 \
     --enc-leapformer-enable \
     --dec-sa-leapformer-enable \
     --dec-ca-leapformer-enable \
