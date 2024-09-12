@@ -563,8 +563,9 @@ class MultiheadAttention(nn.Module):
                     embed_dim=self.embed_dim,
                     q_LeaP=self.q_LeaP,
                     k_LeaP=self.k_LeaP,
+                    out_proj=self.out_proj,
                     need_weights=need_weights,
-                    need_head_weights=need_head_weights
+                    need_head_weights=need_head_weights,
                 )
             
             else:
