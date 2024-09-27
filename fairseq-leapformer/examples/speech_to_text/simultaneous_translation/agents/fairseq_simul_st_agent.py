@@ -371,7 +371,7 @@ class FairseqSimulSTAgent(SpeechAgent):
             torch.LongTensor([states.units.source.value.size(0)])
         )
 
-        states.encoder_states = self.model.encoder(src_indices, src_lengths)
+        states.encoder_states = self.model.encoder(src_indices, src_lengths, encoder_inference_flag=True)
         torch.cuda.empty_cache()
 
     def update_states_read(self, states):

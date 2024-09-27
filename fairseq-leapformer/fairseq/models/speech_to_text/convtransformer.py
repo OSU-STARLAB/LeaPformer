@@ -380,7 +380,7 @@ class ConvTransformerEncoder(FairseqEncoder):
         mb, seq = x.size()[:2]
         return x.contiguous().view(mb, seq, -1).size(-1)
 
-    def forward(self, src_tokens, src_lengths, return_all_hiddens=False,):
+    def forward(self, src_tokens, src_lengths, encoder_inference_flag=False, return_all_hiddens=False,):
         """Encode input sequence.
         :param torch.Tensor xs: input tensor
         :param torch.Tensor masks: input mask
@@ -416,7 +416,7 @@ class ConvTransformerEncoder(FairseqEncoder):
 
 
         for l_idx, layer in enumerate(self.transformer_layers):
-            x = layer(x=x, encoder_padding_mask=encoder_padding_mask)
+            x = layer(x=x, encoder_padding_mask=encoder_padding_mask, encoder_inference_flag=encoder_inference_flag)
             if (self.ctc_layer is not None) and (self.ctc_layer == l_idx +1):
                 x_ctc = self.ctc_fc(x)
                 ctc_padding_mask = encoder_padding_mask
