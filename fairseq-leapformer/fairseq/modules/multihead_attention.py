@@ -449,7 +449,7 @@ class MultiheadAttention(nn.Module):
         # incremental_state and simul_attn_chkpts objects are available to use
         if self.leapformer_enable:
             if incremental_state is not None and simul_attn_chkpts is not None:
-                return leapformer_attn_causal_infer(
+                leapformer_dec_sa_infer_output, leapformer_weights = leapformer_attn_causal_infer(
                    q=q,
                    k=k,
                    v=v,
@@ -463,7 +463,7 @@ class MultiheadAttention(nn.Module):
                    need_weights=need_weights,
                    need_head_weights=need_head_weights,
                    layer_idx=layer_idx,
-                   self_attn=(not self.encoder_decoder_attention) 
+                   self_attn=self.self_attention
                 )
 
 
@@ -508,6 +508,12 @@ class MultiheadAttention(nn.Module):
             incremental_state = self._set_input_buffer(incremental_state, saved_state)
         assert k is not None
         assert k.size(1) == src_len
+        
+        # workaround to avoid modifying fairseq's incremental state behavior, need to have a
+        # prev_key and prev_value when state has to be pruned due to "false start" on SimulST
+        if self.leapformer_enable:
+            if incremental_state is not None and simul_attn_chkpts is not None:
+                return leapformer_dec_sa_infer_output, leapformer_weights
 
         # This is part of a workaround to get around fork/join parallelism
         # not supporting Optional types.

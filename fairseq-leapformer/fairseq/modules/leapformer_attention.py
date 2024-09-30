@@ -271,9 +271,9 @@ def leapformer_attn_causal_infer(
     q = F.relu(q)
     if k is not None:
         k = F.relu(k)
-    
+   
     # acquire old data from incremental state
-    attn_block = "attn" if self_attn else "cross_attn"
+    attn_block = "self_attn" if self_attn else "cross_attn"
     old_attn_weights_v_sin = simul_attn_chkpts["layers"][layer_idx][attn_block]["kTv_sin"]
     old_attn_weights_v_cos = simul_attn_chkpts["layers"][layer_idx][attn_block]["kTv_cos"]
     norm_sin_old = simul_attn_chkpts["layers"][layer_idx][attn_block]["norm_sin"]
@@ -296,14 +296,14 @@ def leapformer_attn_causal_infer(
 
     # build normalization vectors
     if norm_sin_old is not None and norm_cos_old is not None:
-        if attn_block == "attn":
+        if attn_block == "self_attn":
             norm_sin = norm_sin_old + k_sin.transpose(1, 2)
             norm_cos = norm_cos_old + k_cos.transpose(1, 2)
         else:
             norm_sin = norm_sin_old
             norm_cos = norm_cos_old
     else:
-        if attn_block == "attn":
+        if attn_block == "self_attn":
             norm_sin = k_sin.transpose(1, 2)
             norm_cos = k_cos.transpose(1, 2)
         else:
@@ -312,7 +312,7 @@ def leapformer_attn_causal_infer(
 
     # build out d x d intermediate matrix
     if old_attn_weights_v_sin is not None and old_attn_weights_v_cos is not None:
-        if attn_block == "attn":
+        if attn_block == "self_attn":
             attn_weights_v_sin = old_attn_weights_v_sin + torch.bmm(k_sin.transpose(1, 2), v)
             attn_weights_v_cos = old_attn_weights_v_cos + torch.bmm(k_cos.transpose(1, 2), v)
         else:
