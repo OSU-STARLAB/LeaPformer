@@ -32,4 +32,5 @@ simuleval \
     --waitk 5 \
     --scores \
     --force-finish \
+    --leapformer-attn-enable \
 

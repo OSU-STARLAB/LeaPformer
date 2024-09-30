@@ -294,10 +294,10 @@ class ConvTransformerModel(FairseqEncoderDecoderModel):
     method definition without **kwargs.
     """
 
-    def forward(self, src_tokens, src_lengths, prev_output_tokens):
+    def forward(self, src_tokens, src_lengths, prev_output_tokens, simul_attn_chkpts=None):
         encoder_out = self.encoder(src_tokens=src_tokens, src_lengths=src_lengths)
         decoder_out = self.decoder(
-            prev_output_tokens=prev_output_tokens, encoder_out=encoder_out
+            prev_output_tokens=prev_output_tokens, encoder_out=encoder_out, simul_attn_chkpts=simul_attn_chkpts
         )
         return decoder_out
 

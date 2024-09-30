@@ -8,6 +8,8 @@ import yaml
 from fairseq import checkpoint_utils, tasks
 from fairseq.file_io import PathManager
 
+import copy
+
 try:
     from simuleval import READ_ACTION, WRITE_ACTION, DEFAULT_EOS
     from simuleval.agents import SpeechAgent
@@ -402,7 +404,7 @@ class FairseqSimulSTAgent(SpeechAgent):
         # required because of quirks with simultaneous architecture in fairseq, likely
         # due to requirements for other inference modes (i.e. schedulers)
         if self.leapformer_attn_enable:
-            simul_chkpts_dc = copy.deepcopy(self.simul_attn_chkpts["layers"[0]])
+            simul_chkpts_dc = copy.deepcopy(self.simul_attn_chkpts["layers"][0])
             x, outputs = self.model.decoder.forward(
                 prev_output_tokens=tgt_indices,
                 encoder_out=states.encoder_states,

@@ -233,6 +233,7 @@ class TransformerMonotonicDecoder(TransformerDecoder):
                 encoder_padding_mask=encoder_padding_mask,
                 incremental_state=incremental_state,
                 simul_attn_chkpts=simul_attn_chkpts,
+                layer_idx=i,
                 self_attn_mask=self.buffered_future_mask(x)
                 if incremental_state is None
                 else None,

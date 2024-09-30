@@ -196,6 +196,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         features_only: bool = False,
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
@@ -226,6 +227,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             prev_output_tokens,
             encoder_out=encoder_out,
             incremental_state=incremental_state,
+            simul_attn_chkpts=simul_attn_chkpts,
             full_context_alignment=full_context_alignment,
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
@@ -240,6 +242,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]],
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
@@ -248,6 +251,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
             prev_output_tokens,
             encoder_out,
             incremental_state,
+            simul_attn_chkpts,
             full_context_alignment,
             alignment_layer,
             alignment_heads,
@@ -264,6 +268,7 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]],
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
+        simul_attn_chkpts: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
@@ -351,10 +356,12 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
                 enc,
                 padding_mask,
                 incremental_state,
+                simul_attn_chkpts,
                 self_attn_mask=self_attn_mask,
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
+                layer_idx=idx
             )
             inner_states.append(x)
             if layer_attn is not None and idx == alignment_layer:
