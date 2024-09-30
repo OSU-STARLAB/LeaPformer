@@ -161,7 +161,8 @@ def leapformer_attn_train(
             attn_weights = attn_weights.mean(dim=0)
     
     return attn, attn_weights
-    
+
+
 # really only intended to be called during bidirectional attention, separated for readability
 # the intended application for this is usually SimulMT or SimulST, in which case we usually don't batch
 # together examples for more accurate latency measurements, so no padding and masking behavior is supported
@@ -287,10 +288,11 @@ def leapformer_attn_causal_infer(
     sin_tr_k = torch.sin((math.pi / 2) * src_denoms)
     cos_tr_k = torch.cos((math.pi / 2) * src_denoms)
     
-    q_sin = torch.mul(q, torch.sin((math.pi / 2) * sin_tr_q))
-    q_cos = torch.mul(q, torch.cos((math.pi / 2) * cos_tr_q))
-    k_sin = torch.mul(k, torch.sin((math.pi / 2) * sin_tr_k))
-    k_cos = torch.mul(k, torch.cos((math.pi / 2) * cos_tr_k))
+    q_sin = torch.mul(q, sin_tr_q)
+    q_cos = torch.mul(q, cos_tr_q)
+    
+    k_sin = torch.mul(k, sin_tr_k)
+    k_cos = torch.mul(k, cos_tr_k)
 
     # build normalization vectors
     if norm_sin_old is not None and norm_cos_old is not None:
