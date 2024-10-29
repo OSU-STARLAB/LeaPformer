@@ -2,12 +2,6 @@
 
 This repository was adapted for validating LeaPformers. We thank the team behind Skyformers for their work on this PyTorch-based LRA implementation and we ask that anyone who uses this adapted version of the repo consider citing their work as well. Example scripts to get LeaPformers working here can be found in `src/scripts` and should require only minor modifications.
 
-## Skyformer
-
-This repository is the official implementation of [Skyformer: Remodel Self-Attention with Gaussian Kernel and Nystr\"om Method](https://arxiv.org/abs/2111.00035) (NeurIPS 2021). 
-
-![image](/doc/Skyformer_model.jpg)
-
 ## Requirements
 
 To install requirements in a Python virtual environment:
@@ -68,14 +62,14 @@ Modify the configuration in `config.py` and run
 ```
 python main.py --mode train --attn skyformer --task lra-text
 ```
-- mode: `train`, `eval`
-- attn: `softmax`, `nystrom`, `linformer`, `reformer`, `perfromer`, `informer`, `bigbird`,  `kernelized`, `skyformer`
+- mode: `train`, `eval` (`eval` currently bugged, fix is TODO)
+- attn: `softmax`, `nystrom`, `linformer`, `reformer`, `perfromer`, `informer`, `bigbird`,  `kernelized`, `skyformer`, ... (see [src/models](src/models) for more)
 - task: `lra-listops`, `lra-pathfinder`, `lra-retrieval`, `lra-text`, `lra-image`
 
 
 ## Reference
 
-If you use this LRA implementation to test out efficient attention mechanisms, you should cite Skyformer. The changes made to enable their implementation were extremely superficial.
+If you use this LRA implementation to test out efficient attention mechanisms, you should cite Skyformer. The changes made to enable their implementation were extremely superficial. We mostly added some extra attention mechanisms and that's about it.
 
 ```bibtex
 @inproceedings{Skyformer,
