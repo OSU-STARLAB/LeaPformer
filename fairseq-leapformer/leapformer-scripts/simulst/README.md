@@ -16,3 +16,6 @@ Linearized training is disabled by default and isn't recommended without custom 
 
 > [!WARNING]  
 > You should not change encoder settings when loading a checkpoint after ASR pretraining. This can result in sub-par model performance, poorer convergence, and generally unintended results.
+
+> [!WARNING]  
+> Currently running into some problems in reproducing models of the the same level of quality as in the paper. Seems to be an environmental issue as baseline models are affected as well. 
